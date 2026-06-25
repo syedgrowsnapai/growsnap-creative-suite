@@ -662,9 +662,9 @@ class DependencySetupWorker(QThread):
     def _download_and_install_ffmpeg(self):
         sys_name = platform.system()
         if sys_name == "Windows":
-            url = "https://github.com/shussain/growsnap-releases/releases/download/deps/ffmpeg-win.zip"
+            url = "https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v4.4.1/ffmpeg-4.4.1-win-64.zip"
         elif sys_name == "Linux":
-            url = "https://github.com/shussain/growsnap-releases/releases/download/deps/ffmpeg-linux.zip"
+            url = "https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v4.4.1/ffmpeg-4.4.1-linux-64.zip"
         else:
             raise Exception(f"Unsupported operating system: {sys_name}")
 
