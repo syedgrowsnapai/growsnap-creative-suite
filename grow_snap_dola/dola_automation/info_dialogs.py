@@ -650,7 +650,10 @@ class DependencySetupWorker(QThread):
 
     def _is_chromium_installed(self):
         try:
-            from patchright.sync_api import sync_playwright
+            try:
+                from patchright.sync_api import sync_playwright
+            except ImportError:
+                from playwright.sync_api import sync_playwright
             with sync_playwright() as p:
                 executable = p.chromium.executable_path
                 if executable and os.path.exists(executable):
@@ -716,7 +719,15 @@ class DependencySetupWorker(QThread):
         import subprocess
         import sys
         
-        cmd = [sys.executable, "-m", "patchright", "install", "chromium"]
+        # Check which module is available
+        module_name = "playwright"
+        try:
+            import patchright
+            module_name = "patchright"
+        except ImportError:
+            pass
+            
+        cmd = [sys.executable, "-m", module_name, "install", "chromium"]
         
         creationflags = 0
         if os.name == 'nt':
@@ -742,10 +753,13 @@ class DependencySetupWorker(QThread):
         process.wait()
         if process.returncode != 0:
             try:
-                from patchright.driver import main as patchright_driver_main
-                patchright_driver_main(["install", "chromium"])
+                if module_name == "patchright":
+                    from patchright.driver import main as driver_main
+                else:
+                    from playwright.driver import main as driver_main
+                driver_main(["install", "chromium"])
             except Exception as e:
-                raise Exception(f"Failed to install patchright chromium: {e}")
+                raise Exception(f"Failed to install {module_name} chromium: {e}")
 
 class DependencyInstallerDialog(QDialog):
     def __init__(self, parent=None):
@@ -830,7 +844,10 @@ def check_and_install_dependencies() -> bool:
     
     browser_ready = False
     try:
-        from patchright.sync_api import sync_playwright
+        try:
+            from patchright.sync_api import sync_playwright
+        except ImportError:
+            from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             executable = p.chromium.executable_path
             if executable and os.path.exists(executable):
