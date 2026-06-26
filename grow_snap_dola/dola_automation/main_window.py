@@ -584,7 +584,12 @@ class MainWindow(QMainWindow):
         self.chk_auto_remove_watermark = QCheckBox("Auto Remove Watermark", self)
         self.chk_auto_remove_watermark.setChecked(True)
         self.chk_auto_remove_watermark.stateChanged.connect(self._update_runner_settings)
-        settings_grid.addWidget(self.chk_auto_remove_watermark, 2, 0, 1, 4)
+        settings_grid.addWidget(self.chk_auto_remove_watermark, 2, 0, 1, 2)
+
+        self.chk_auto_delete_scene_clips = QCheckBox("Auto Delete Scene Clips", self)
+        self.chk_auto_delete_scene_clips.setChecked(True)
+        self.chk_auto_delete_scene_clips.stateChanged.connect(self._update_runner_settings)
+        settings_grid.addWidget(self.chk_auto_delete_scene_clips, 2, 2, 1, 2)
 
         settings_grid.addWidget(QLabel("Threads", self), 3, 0)
         self.spin_threads = QSpinBox(self)
@@ -1098,6 +1103,7 @@ class MainWindow(QMainWindow):
         s.launch_delay_sec = self.spin_launch_delay.value()
         s.paste_delay_sec = self.spin_paste_delay.value()
         s.auto_remove_watermark = self.chk_auto_remove_watermark.isChecked()
+        s.auto_delete_scene_clips = self.chk_auto_delete_scene_clips.isChecked()
         s.watermark_method = self.combo_watermark_method.currentText()
         s.download_dir = self.download_dir
         s.auth_state_path = Path.home() / 'Documents' / 'dola_video_automation' / 'auth_state.json'
@@ -1138,6 +1144,7 @@ class MainWindow(QMainWindow):
         self.settings.launch_delay_sec = s.launch_delay_sec
         self.settings.paste_delay_sec = s.paste_delay_sec
         self.settings.auto_remove_watermark = s.auto_remove_watermark
+        self.settings.auto_delete_scene_clips = s.auto_delete_scene_clips
         self.settings.watermark_method = s.watermark_method
         self.settings.download_dir = s.download_dir
         
@@ -1215,6 +1222,7 @@ class MainWindow(QMainWindow):
                 'submit_close_delay_sec': self.spin_submit_delay.value(),
                 'inject_ui_downloader': self.chk_inject_ui.isChecked(),
                 'auto_remove_watermark': self.chk_auto_remove_watermark.isChecked(),
+                'auto_delete_scene_clips': self.chk_auto_delete_scene_clips.isChecked(),
                 'model': self.combo_model.currentText(),
                 'duration': self.combo_duration.currentText(),
                 'ratio': self.combo_ratio.currentText(),
@@ -1247,6 +1255,7 @@ class MainWindow(QMainWindow):
             self.spin_submit_delay.setValue(data.get('submit_close_delay_sec', 15))
             self.chk_inject_ui.setChecked(data.get('inject_ui_downloader', True))
             self.chk_auto_remove_watermark.setChecked(data.get('auto_remove_watermark', True))
+            self.chk_auto_delete_scene_clips.setChecked(data.get('auto_delete_scene_clips', True))
             self.combo_model.setCurrentText(data.get('model', 'SeaDance 2.0 Fast'))
             self.combo_duration.setCurrentText(data.get('duration', '10s'))
             self.combo_ratio.setCurrentText(data.get('ratio', '9:16'))
@@ -1853,39 +1862,59 @@ class MainWindow(QMainWindow):
                 else:
                     self._log(f"Quality Check Warning: Merged video duration ({merged_duration:.2f}s) mismatch with sum of scenes ({sum_durations:.2f}s)!")
                 
-                # Save captions text sidecar
-                caption_text = title_jobs[0].caption or ""
-                if caption_text:
-                    txt_path = output_path.with_suffix('.txt')
-                    txt_path.write_text(caption_text, encoding='utf-8')
-                    self._log(f"Saved sidecar caption file: {txt_path.name}")
+                # Gather unique captions from all scene files to merge/consolidate
+                captions = []
+                for p in input_paths:
+                    p_obj = Path(p)
+                    txt_file = p_obj.with_suffix('.txt')
+                    if txt_file.exists():
+                        try:
+                            content = txt_file.read_text(encoding='utf-8').strip()
+                            if content and content not in captions:
+                                captions.append(content)
+                        except Exception as e:
+                            logger.error(f"Failed to read caption file '{txt_file}': {e}")
                 
-                # Send system notification and show pop-up message
+                # Fallback to job attributes if no file-level captions were found
+                if not captions:
+                    for j in title_jobs:
+                        if j.caption and j.caption.strip() not in captions:
+                            captions.append(j.caption.strip())
+                
+                merged_caption = "\n\n".join(captions)
+                if merged_caption:
+                    txt_path = output_path.with_suffix('.txt')
+                    txt_path.write_text(merged_caption, encoding='utf-8')
+                    self._log(f"Saved consolidated sidecar caption file: {txt_path.name}")
+                
+                # Send system notification
                 notif_msg = f"Video merger and post-processing completed successfully for: '{video_title}'."
                 self._send_notification("Video Merger Complete", notif_msg)
                 
-                confirm = QMessageBox.question(
-                    self,
-                    "Delete Individual Scene Clips?",
-                    f"Video merger completed for '{video_title}'.\n\n"
-                    "Would you like to delete the individual raw scene clips from the downloads folder to save storage space?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No
-                )
-                if confirm == QMessageBox.StandardButton.Yes:
-                    self._log("Deleting individual raw scene clips as requested...")
+                # Perform auto-delete / clean up if setting is enabled
+                if self.settings.auto_delete_scene_clips:
+                    self._log("Auto Delete Scene Clips is enabled. Deleting individual raw scene clips and sidecar caption text files...")
                     del_count = 0
+                    del_txt_count = 0
                     for p in input_paths:
+                        p_obj = Path(p)
                         try:
-                            p_obj = Path(p)
                             if p_obj.exists():
                                 p_obj.unlink()
                                 del_count += 1
                         except Exception as e:
                             logger.error(f"Failed to delete individual raw clip '{p}': {e}")
-                    self._log(f"Successfully deleted {del_count} individual raw scene clips.")
+                        
+                        try:
+                            txt_obj = p_obj.with_suffix('.txt')
+                            if txt_obj.exists():
+                                txt_obj.unlink()
+                                del_txt_count += 1
+                        except Exception as e:
+                            logger.error(f"Failed to delete sidecar txt '{txt_obj}': {e}")
+                    self._log(f"Auto Delete: Successfully deleted {del_count} individual raw scene clips and {del_txt_count} sidecar caption text files.")
                 else:
-                    self._log("Kept individual raw scene clips in the downloads folder.")
+                    self._log("Auto Delete Scene Clips is disabled. Kept individual raw scene clips and sidecar caption text files in the downloads folder.")
             else:
                 self._log(f"Failed to losslessly concatenate scenes for '{video_title}'. Check FFmpeg path/logs.")
 
