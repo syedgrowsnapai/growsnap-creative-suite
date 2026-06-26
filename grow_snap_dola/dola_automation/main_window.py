@@ -1,5 +1,6 @@
 import sys
 import os
+import subprocess
 import time
 import json
 import csv
@@ -25,9 +26,10 @@ from PyQt6.QtGui import QColor, QCursor, QAction, QKeySequence, QShortcut, QIcon
 from dola_automation.models import AutomationSettings, PromptJob, JobStatus, parse_prompts, align_reference_images
 from dola_automation.database import HistoryDatabase
 from dola_automation.browser_worker import DolaBrowserWorker, DolaAutomationError
-from dola_automation.ffmpeg_utils import process_video_watermark, concatenate_videos, ConverterWorker, MergerWorker, get_video_duration
+from dola_automation.ffmpeg_utils import process_video_watermark, concatenate_videos, ConverterWorker, MergerWorker, get_video_duration, get_ffmpeg_path, get_video_resolution
 from dola_automation.styles import APP_STYLE, STATUS_COLORS, GradientLabel
 from dola_automation.info_dialogs import InstructionsDialog, IssuesDialog, SupportDialog, ThreadsWarningDialog, WatermarkHelpDialog, MergerHelpDialog
+from dola_automation.hook_factory import ViralHookFactoryWidget
 from dola_automation.logger import logger
 from dola_automation.telemetry import TelemetryTracker
 
@@ -442,16 +444,22 @@ class MainWindow(QMainWindow):
         self.btn_nav_merger.setCheckable(True)
         self.btn_nav_merger.setObjectName("nav_button")
         
+        self.btn_nav_hook_factory = QPushButton("Viral Hook Factory", self)
+        self.btn_nav_hook_factory.setCheckable(True)
+        self.btn_nav_hook_factory.setObjectName("nav_button")
+        
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
         self.nav_group.addButton(self.btn_nav_dola, 0)
         self.nav_group.addButton(self.btn_nav_converter, 1)
         self.nav_group.addButton(self.btn_nav_merger, 2)
+        self.nav_group.addButton(self.btn_nav_hook_factory, 3)
         self.nav_group.idClicked.connect(self._on_nav_changed)
         
         nav_layout.addWidget(self.btn_nav_dola)
         nav_layout.addWidget(self.btn_nav_converter)
         nav_layout.addWidget(self.btn_nav_merger)
+        nav_layout.addWidget(self.btn_nav_hook_factory)
         nav_layout.addStretch()
         
         main_layout.addLayout(nav_layout)
@@ -672,6 +680,15 @@ class MainWindow(QMainWindow):
         self.edit_success_phrase.setPlaceholderText("Enter success confirmation phrase...")
         self.edit_success_phrase.textChanged.connect(self._update_runner_settings)
         settings_grid.addWidget(self.edit_success_phrase, 9, 1, 1, 3)
+
+        self.chk_prepend_hook = QCheckBox("Prepend Viral Hook", self)
+        self.chk_prepend_hook.stateChanged.connect(self._update_runner_settings)
+        settings_grid.addWidget(self.chk_prepend_hook, 10, 0, 1, 2)
+
+        settings_grid.addWidget(QLabel("Select Hook", self), 10, 2)
+        self.combo_select_hook = QComboBox(self)
+        self.combo_select_hook.currentIndexChanged.connect(self._update_runner_settings)
+        settings_grid.addWidget(self.combo_select_hook, 10, 3)
 
         # Operational buttons
         run_row = QHBoxLayout()
@@ -1064,6 +1081,11 @@ class MainWindow(QMainWindow):
         page_merge_layout.addWidget(tab_merger)
         self.stacked_widget.addWidget(self.page_merger)
 
+        # ─── PAGE 4: VIRAL HOOK FACTORY ──────────────────────
+        self.page_hook_factory = ViralHookFactoryWidget(self, self.db, self.settings)
+        self.page_hook_factory.hook_saved_signal.connect(self._refresh_hooks_combobox)
+        self.stacked_widget.addWidget(self.page_hook_factory)
+
     def _on_nav_changed(self, button_id):
         self.stacked_widget.setCurrentIndex(button_id)
 
@@ -1108,6 +1130,8 @@ class MainWindow(QMainWindow):
         s.download_dir = self.download_dir
         s.auth_state_path = Path.home() / 'Documents' / 'dola_video_automation' / 'auth_state.json'
         s.generation_success_phrase = self.edit_success_phrase.text()
+        s.prepend_viral_hook = self.chk_prepend_hook.isChecked()
+        s.selected_hook_id = self.combo_select_hook.currentData() or -1
         
         # Coordinates
         s.watermark_blur_x = 540
@@ -1145,6 +1169,8 @@ class MainWindow(QMainWindow):
         self.settings.paste_delay_sec = s.paste_delay_sec
         self.settings.auto_remove_watermark = s.auto_remove_watermark
         self.settings.auto_delete_scene_clips = s.auto_delete_scene_clips
+        self.settings.prepend_viral_hook = s.prepend_viral_hook
+        self.settings.selected_hook_id = s.selected_hook_id
         self.settings.watermark_method = s.watermark_method
         self.settings.download_dir = s.download_dir
         
@@ -1223,6 +1249,8 @@ class MainWindow(QMainWindow):
                 'inject_ui_downloader': self.chk_inject_ui.isChecked(),
                 'auto_remove_watermark': self.chk_auto_remove_watermark.isChecked(),
                 'auto_delete_scene_clips': self.chk_auto_delete_scene_clips.isChecked(),
+                'prepend_viral_hook': self.chk_prepend_hook.isChecked(),
+                'selected_hook_id': self.combo_select_hook.currentData() or -1,
                 'model': self.combo_model.currentText(),
                 'duration': self.combo_duration.currentText(),
                 'ratio': self.combo_ratio.currentText(),
@@ -1256,6 +1284,12 @@ class MainWindow(QMainWindow):
             self.chk_inject_ui.setChecked(data.get('inject_ui_downloader', True))
             self.chk_auto_remove_watermark.setChecked(data.get('auto_remove_watermark', True))
             self.chk_auto_delete_scene_clips.setChecked(data.get('auto_delete_scene_clips', True))
+            self.chk_prepend_hook.setChecked(data.get('prepend_viral_hook', False))
+            self._refresh_hooks_combobox()
+            selected_id = data.get('selected_hook_id', -1)
+            idx = self.combo_select_hook.findData(selected_id)
+            if idx >= 0:
+                self.combo_select_hook.setCurrentIndex(idx)
             self.combo_model.setCurrentText(data.get('model', 'SeaDance 2.0 Fast'))
             self.combo_duration.setCurrentText(data.get('duration', '10s'))
             self.combo_ratio.setCurrentText(data.get('ratio', '9:16'))
@@ -1829,8 +1863,51 @@ class MainWindow(QMainWindow):
             slug_title = self._slug(video_title)
             output_path = self.download_dir / f"{slug_title}.mp4"
             
+            temp_hook_path = None
+            if self.settings.prepend_viral_hook:
+                hook_path_str = None
+                hook_id = self.settings.selected_hook_id
+                try:
+                    hooks = self.db.list_viral_hooks()
+                    if hooks:
+                        if hook_id == -1: # Random Hook
+                            import random
+                            selected_hook = random.choice(hooks)
+                            hook_path_str = selected_hook['file_path']
+                        elif hook_id == -2: # Most Recent Hook
+                            selected_hook = hooks[0]
+                            hook_path_str = selected_hook['file_path']
+                        else:
+                            selected_hook = next((h for h in hooks if h['id'] == hook_id), None)
+                            if selected_hook:
+                                hook_path_str = selected_hook['file_path']
+                            else:
+                                hook_path_str = hooks[0]['file_path']
+                except Exception as e:
+                    self._log(f"Failed to query hook library database: {e}")
+                
+                if hook_path_str and Path(hook_path_str).exists():
+                    p_hook = Path(hook_path_str)
+                    temp_hook_path = p_hook.parent / f"temp_align_{self._slug(video_title)}_{p_hook.name}"
+                    self._log(f"Prepending Viral Hook: '{p_hook.name}'... Aligning parameters to match generated clip...")
+                    if self._align_hook_to_video(p_hook, Path(input_paths[0]), temp_hook_path):
+                        input_paths = [str(temp_hook_path)] + input_paths
+                        self._log("Hook parameters aligned and prepended successfully.")
+                    else:
+                        self._log("Warning: Failed to align hook parameters. Attempting merge with original hook file.")
+                        input_paths = [str(p_hook)] + input_paths
+                else:
+                    self._log("Warning: Prepend hook active but selected hook file was not found or database is empty.")
+
             self._log(f"All scenes for video '{video_title}' are downloaded. Expected duration: {sum_durations:.2f}s. Concatenating losslessly...")
             success = concatenate_videos(input_paths, str(output_path))
+            
+            # Clean up temporary aligned hook if generated
+            if temp_hook_path and temp_hook_path.exists():
+                try:
+                    temp_hook_path.unlink()
+                except Exception as e:
+                    logger.error(f"Failed to delete temporary aligned hook file: {e}")
             if success:
                 self._log(f"Lossless merge success! Video generated: {output_path.name}")
                 
@@ -2694,6 +2771,78 @@ class MainWindow(QMainWindow):
         else:
             self._log("You are running the latest version.")
             QMessageBox.information(self, "Update Check", f"You are running the latest version: GrowSnap Creative Suite v{APP_VERSION}")
+
+    def _align_hook_to_video(self, hook_path: Path, ref_path: Path, temp_path: Path) -> bool:
+        ffmpeg_exe = get_ffmpeg_path()
+        try:
+            width, height = get_video_resolution(ref_path)
+            
+            # Check for audio
+            probe_cmd = [str(ffmpeg_exe), '-i', str(hook_path)]
+            creationflags = 0
+            if os.name == 'nt':
+                creationflags = subprocess.CREATE_NO_WINDOW
+            probe_res = subprocess.run(
+                probe_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                creationflags=creationflags
+            )
+            has_audio = 'audio' in probe_res.stderr.lower() or 'audio:' in probe_res.stderr.lower()
+            
+            cmd = [str(ffmpeg_exe), '-y', '-i', str(hook_path)]
+            if not has_audio:
+                cmd.extend(['-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100'])
+                
+            cmd.extend([
+                '-vf', f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1",
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-crf', '23',
+                '-r', '30',
+                '-c:a', 'aac',
+                '-ar', '44100',
+                '-ac', '2'
+            ])
+            if not has_audio:
+                cmd.append('-shortest')
+                
+            cmd.append(str(temp_path))
+            
+            res = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                creationflags=creationflags
+            )
+            return res.returncode == 0
+        except Exception as e:
+            logger.error(f"Failed to align hook properties: {e}")
+            return False
+
+    def _refresh_hooks_combobox(self):
+        if not hasattr(self, 'combo_select_hook'):
+            return
+        self.combo_select_hook.blockSignals(True)
+        self.combo_select_hook.clear()
+        self.combo_select_hook.addItem("Random Hook", -1)
+        self.combo_select_hook.addItem("Most Recent Hook", -2)
+        try:
+            hooks = self.db.list_viral_hooks()
+            for h in hooks:
+                self.combo_select_hook.addItem(h['title'], h['id'])
+        except Exception as e:
+            logger.error(f"Failed to load hooks for combo box: {e}")
+            
+        selected_id = getattr(self.settings, 'selected_hook_id', -1)
+        idx = self.combo_select_hook.findData(selected_id)
+        if idx >= 0:
+            self.combo_select_hook.setCurrentIndex(idx)
+        else:
+            self.combo_select_hook.setCurrentIndex(0)
+        self.combo_select_hook.blockSignals(False)
 
     def closeEvent(self, event):
         self._save_json_backup()

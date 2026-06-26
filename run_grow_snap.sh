@@ -7,7 +7,7 @@ if [ ! -d ".venv" ]; then
     python3 -m venv .venv
     source .venv/bin/activate
     python3 -m pip install --upgrade pip
-    pip install pyqt6 patchright requests
+    pip install pyqt6 patchright requests yt-dlp
 else
     source .venv/bin/activate
 fi

@@ -19,7 +19,7 @@ if not exist .venv (
     echo Installing required packages...
     call .venv\Scripts\activate.bat
     python -m pip install --upgrade pip
-    pip install pyqt6 patchright requests
+    pip install pyqt6 patchright requests yt-dlp
 ) else (
     call .venv\Scripts\activate.bat
 )

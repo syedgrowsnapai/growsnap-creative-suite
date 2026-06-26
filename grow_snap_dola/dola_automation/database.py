@@ -62,6 +62,17 @@ class HistoryDatabase:
                     FOREIGN KEY (job_id) REFERENCES jobs(id)
                 );
 
+                CREATE TABLE IF NOT EXISTS viral_hooks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    duration REAL,
+                    aspect_ratio TEXT,
+                    platform TEXT,
+                    source_url TEXT,
+                    created_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_jobs_session ON jobs(session_id);
                 CREATE INDEX IF NOT EXISTS idx_downloads_job ON downloads(job_id);
             """)
@@ -307,5 +318,33 @@ class HistoryDatabase:
             params.append(limit_val)
             
             return conn.execute(query, tuple(params)).fetchall()
+        finally:
+            conn.close()
+
+    def add_viral_hook(self, title: str, file_path: str, duration: float, aspect_ratio: str, platform: str = "", source_url: str = "") -> int:
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO viral_hooks (title, file_path, duration, aspect_ratio, platform, source_url, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (title, file_path, duration, aspect_ratio, platform, source_url, _utc_now()))
+            conn.commit()
+            return cur.lastrowid
+        finally:
+            conn.close()
+
+    def list_viral_hooks(self) -> List[sqlite3.Row]:
+        conn = self._connect()
+        try:
+            return conn.execute("SELECT * FROM viral_hooks ORDER BY id DESC").fetchall()
+        finally:
+            conn.close()
+
+    def delete_viral_hook(self, hook_id: int) -> None:
+        conn = self._connect()
+        try:
+            conn.execute("DELETE FROM viral_hooks WHERE id = ?", (hook_id,))
+            conn.commit()
         finally:
             conn.close()

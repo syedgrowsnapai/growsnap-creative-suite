@@ -37,6 +37,8 @@ class AutomationSettings:
     auth_state_path: Path = field(default_factory=lambda: Path.home() / 'Documents' / 'dola_video_automation' / 'auth_state.json')
     auto_remove_watermark: bool = True
     auto_delete_scene_clips: bool = True
+    prepend_viral_hook: bool = False
+    selected_hook_id: int = -1
     watermark_method: str = 'Blur'
     watermark_blur_x: int = 540
     watermark_blur_y: int = 1220
