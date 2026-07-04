@@ -1,11 +1,11 @@
-# 🚀 GrowSnap Creative Suite — Simplified Installation & Setup Guide
+# 🚀 GrowSnap One — Simplified Installation & Setup Guide
 
-This guide is designed for end-users to install, configure, and activate the **GrowSnap Creative Suite** on any computer in one click.
+This guide is designed for end-users to install, configure, and activate the **GrowSnap One** on any computer in one click.
 
 ---
 
 ## 📋 Step 1: Copy and Extract the Package
-1. Download or copy the **`GrowSnap_Creative_Suite.zip`** package onto your computer.
+1. Download or copy the **`GrowSnap_One.zip`** package onto your computer.
 2. Move the ZIP file to a convenient folder (such as your `Documents` or `Desktop` directory).
 3. Right-click the `.zip` file and select **Extract All...** (on Windows) or double-click it (on macOS/Linux) to unzip the files.
 
@@ -34,7 +34,7 @@ After activation, the suite executes an automated first-run setup:
 - It checks for **FFmpeg** encoders (downloading static builds in the background if they are missing).
 - It verifies and installs the **Patchright Chromium** anti-detect browser driver.
 
-Once the setup progress bar reaches 100%, the main **GrowSnap Creative Suite** dashboard will launch automatically, and you are ready to begin!
+Once the setup progress bar reaches 100%, the main **GrowSnap One** dashboard will launch automatically, and you are ready to begin!
 
 ---
 

@@ -1,6 +1,6 @@
 @echo off
 echo ===================================================
-echo   GrowSnap Creative Suite — GitHub Installer
+echo   GrowSnap One — GitHub Installer
 echo ===================================================
 echo.
 
@@ -107,15 +107,15 @@ if not exist %EXTRACTED_FOLDER% (
 )
 
 :: Rename or copy contents
-if exist "GrowSnap Creative Suite" (
-    echo [Installer] Updating existing GrowSnap Creative Suite folder...
-    xcopy /E /I /Y %EXTRACTED_FOLDER% "GrowSnap Creative Suite"
+if exist "GrowSnap One" (
+    echo [Installer] Updating existing GrowSnap One folder...
+    xcopy /E /I /Y %EXTRACTED_FOLDER% "GrowSnap One"
     rd /S /Q %EXTRACTED_FOLDER%
 ) else (
-    move %EXTRACTED_FOLDER% "GrowSnap Creative Suite"
+    move %EXTRACTED_FOLDER% "GrowSnap One"
 )
 
-cd "GrowSnap Creative Suite"
+cd "GrowSnap One"
 
 :: 3. Setup Virtual Environment
 echo [Installer] Creating virtual environment...
@@ -130,6 +130,6 @@ echo.
 echo ===================================================
 echo   Installation Completed Successfully!
 echo   Double-click 'run_grow_snap.bat' inside the
-echo   "GrowSnap Creative Suite" folder to launch!
+echo   "GrowSnap One" folder to launch!
 echo ===================================================
 pause

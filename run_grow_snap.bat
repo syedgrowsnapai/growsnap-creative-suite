@@ -1,13 +1,13 @@
 @echo off
 cd /d "%~dp0"
 echo ===================================================
-echo   GrowSnap Creative Suite — Launcher
+echo   GrowSnap One — Launcher
 echo ===================================================
 echo.
 
 :: 1. If virtual env already exists, run the application directly
 if exist .venv\Scripts\python.exe (
-    echo Starting GrowSnap Creative Suite...
+    echo Starting GrowSnap One...
     start "" ".venv\Scripts\python.exe" "grow_snap_dola/main.py" %*
     exit /b
 )
@@ -58,5 +58,5 @@ call .venv\Scripts\activate.bat
 python -m pip install --upgrade pip
 pip install pyqt6 patchright requests yt-dlp gTTS
 
-echo Starting GrowSnap Creative Suite...
+echo Starting GrowSnap One...
 python grow_snap_dola/main.py %*

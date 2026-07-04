@@ -425,9 +425,9 @@ class MainWindow(QMainWindow):
             email = lic_data.get('email', 'N/A')
             plan = lic_data.get('plan', 'N/A')
             days_left = lic_data.get('days_left', 0)
-            self.setWindowTitle(f"GrowSnap Creative Suite — User: {email} | Plan: {plan} ({days_left} days left)")
+            self.setWindowTitle(f"GrowSnap One — User: {email} | Plan: {plan} ({days_left} days left)")
         else:
-            self.setWindowTitle("GrowSnap Creative Suite")
+            self.setWindowTitle("GrowSnap One")
             
         self.resize(1300, 850)
         
@@ -3504,7 +3504,7 @@ class MainWindow(QMainWindow):
             dialog.exec()
         else:
             self._log("You are running the latest version.")
-            QMessageBox.information(self, "Update Check", f"You are running the latest version: GrowSnap Creative Suite v{APP_VERSION}")
+            QMessageBox.information(self, "Update Check", f"You are running the latest version: GrowSnap One v{APP_VERSION}")
 
     def _align_hook_to_video(self, hook_path: Path, ref_path: Path, temp_path: Path) -> bool:
         ffmpeg_exe = get_ffmpeg_path()

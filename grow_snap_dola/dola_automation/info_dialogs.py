@@ -824,7 +824,7 @@ class DependencySetupWorker(QThread):
 class DependencyInstallerDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("GrowSnap Creative Suite — First Run Setup")
+        self.setWindowTitle("GrowSnap One — First Run Setup")
         self.setFixedSize(480, 240)
         self.setStyleSheet(APP_STYLE)
         

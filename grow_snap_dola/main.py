@@ -62,7 +62,7 @@ def register_desktop_entry():
         
         desktop_content = f"""[Desktop Entry]
 Type=Application
-Name=GrowSnap Creative Suite
+Name=GrowSnap One
 Comment=AI Video Automation & Production Suite
 Exec={run_script}
 Icon={icon_png}
@@ -94,7 +94,7 @@ def main():
     app = QApplication(sys.argv)
     
     app.setApplicationName("growsnapai")
-    app.setApplicationDisplayName("GrowSnap Creative Suite")
+    app.setApplicationDisplayName("GrowSnap One")
     
     # Enable matching on Linux/Wayland
     try:
