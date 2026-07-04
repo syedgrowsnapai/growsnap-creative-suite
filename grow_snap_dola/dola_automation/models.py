@@ -45,6 +45,7 @@ class AutomationSettings:
     watermark_blur_w: int = 170
     watermark_blur_h: int = 80
     watermark_crop_pixels: int = 80
+    watermark_preset: str = 'Dola'
     generation_success_phrase: str = 'will be generated using'
 
 @dataclass

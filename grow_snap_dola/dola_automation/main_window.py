@@ -17,10 +17,10 @@ from PyQt6.QtWidgets import (
     QFrame, QProgressBar, QTableWidget, QTableWidgetItem, QCheckBox, QSpinBox, QComboBox,
     QFileDialog, QMessageBox, QTabWidget, QSplitter, QListWidget, QListWidgetItem,
     QLineEdit, QPlainTextEdit, QGroupBox, QAbstractItemView, QHeaderView, QMenu, QDialog,
-    QApplication, QSystemTrayIcon, QButtonGroup, QStackedWidget
+    QApplication, QSystemTrayIcon, QButtonGroup, QStackedWidget, QStylePainter, QStyleOptionComboBox, QStyle
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot, QTimer, QTime, QElapsedTimer, QPoint, QEvent
-from PyQt6.QtGui import QColor, QCursor, QAction, QKeySequence, QShortcut, QIcon
+from PyQt6.QtGui import QColor, QCursor, QAction, QKeySequence, QShortcut, QIcon, QPalette, QStandardItemModel, QStandardItem
 
 # Import our automation modules
 from dola_automation.models import AutomationSettings, PromptJob, JobStatus, parse_prompts, align_reference_images
@@ -29,9 +29,95 @@ from dola_automation.browser_worker import DolaBrowserWorker, DolaAutomationErro
 from dola_automation.ffmpeg_utils import process_video_watermark, concatenate_videos, ConverterWorker, MergerWorker, get_video_duration, get_ffmpeg_path, get_video_resolution
 from dola_automation.styles import APP_STYLE, STATUS_COLORS, GradientLabel
 from dola_automation.info_dialogs import InstructionsDialog, IssuesDialog, SupportDialog, ThreadsWarningDialog, WatermarkHelpDialog, MergerHelpDialog
-from dola_automation.hook_factory import ViralHookFactoryWidget
+from dola_automation.hook_factory import ViralHookFactoryWidget, ProfileOutliersWidget, HookLibraryWidget
 from dola_automation.logger import logger
 from dola_automation.telemetry import TelemetryTracker
+
+class CheckableComboBox(QComboBox):
+    checkedItemsChanged = pyqtSignal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setModel(QStandardItemModel(self))
+        self.model().dataChanged.connect(self._on_data_changed)
+        self.view().viewport().installEventFilter(self)
+        
+    def add_checkable_item(self, text, checked=False):
+        item = QStandardItem(text)
+        item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+        item.setData(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked, Qt.ItemDataRole.CheckStateRole)
+        self.model().appendRow(item)
+        
+    def _on_data_changed(self, topLeft, bottomRight, roles):
+        if Qt.ItemDataRole.CheckStateRole in roles:
+            self.checkedItemsChanged.emit()
+            
+    def get_checked_items(self):
+        checked = []
+        for i in range(self.count()):
+            item = self.model().item(i)
+            if item and item.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked:
+                checked.append(item.text().lower())
+        return checked
+
+    def set_checked_items(self, items_list):
+        self.model().blockSignals(True)
+        for i in range(self.count()):
+            item = self.model().item(i)
+            if item:
+                state = Qt.CheckState.Checked if item.text().lower() in items_list else Qt.CheckState.Unchecked
+                item.setData(state, Qt.ItemDataRole.CheckStateRole)
+        self.model().blockSignals(False)
+        self.checkedItemsChanged.emit()
+
+    def eventFilter(self, widget, event):
+        if widget == self.view().viewport() and event.type() == QEvent.Type.MouseButtonPress:
+            index = self.view().indexAt(event.pos())
+            item = self.model().itemFromIndex(index)
+            if item:
+                # Toggle check state
+                current = item.data(Qt.ItemDataRole.CheckStateRole)
+                new_state = Qt.CheckState.Unchecked if current == Qt.CheckState.Checked else Qt.CheckState.Checked
+                item.setData(new_state, Qt.ItemDataRole.CheckStateRole)
+                
+                # Special behavior for "All Statuses"
+                if item.text() == "All Statuses":
+                    self.model().blockSignals(True)
+                    for i in range(1, self.count()):
+                        sibling = self.model().item(i)
+                        if sibling:
+                            sibling.setData(new_state, Qt.ItemDataRole.CheckStateRole)
+                    self.model().blockSignals(False)
+                    self.checkedItemsChanged.emit()
+                else:
+                    # If any individual status is unchecked, "All Statuses" should be unchecked
+                    all_item = self.model().item(0)
+                    if all_item and new_state == Qt.CheckState.Unchecked:
+                        self.model().blockSignals(True)
+                        all_item.setData(Qt.CheckState.Unchecked, Qt.ItemDataRole.CheckStateRole)
+                        self.model().blockSignals(False)
+                        self.checkedItemsChanged.emit()
+                return True
+        return super().eventFilter(widget, event)
+
+    def paintEvent(self, event):
+        painter = QStylePainter(self)
+        painter.setPen(self.palette().color(QPalette.ColorRole.Text))
+        
+        opt = QStyleOptionComboBox()
+        self.initStyleOption(opt)
+        
+        checked = self.get_checked_items()
+        if not checked:
+            opt.currentText = "Select Status..."
+        elif len(checked) == self.count():
+            opt.currentText = "All Statuses"
+        else:
+            opt.currentText = ", ".join(item.capitalize() for item in checked)
+            
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, opt)
+        painter.drawControl(QStyle.ControlElement.CE_ComboBoxLabel, opt)
+
 
 class BatchRunner(QThread):
     job_progress = pyqtSignal(int, str)  # job_index, message
@@ -131,7 +217,10 @@ class BatchRunner(QThread):
             
         # Safe thread settings isolation
         thread_settings = copy.deepcopy(self.settings)
-        worker_mode = "download_only" if self.mode == "download_only" else "full"
+        if job.chat_url and self.mode != "submit_only":
+            worker_mode = "download_only"
+        else:
+            worker_mode = "download_only" if self.mode == "download_only" else "full"
         if self.mode == "submit_only":
             thread_settings.submit_and_close = True
             
@@ -169,8 +258,22 @@ class BatchRunner(QThread):
                     break
                 self.active_workers[job.index] = worker
                 
+            # Calculate relative video index for jobs sharing the same chat_url and video_title
+            video_idx = 0
+            if job.chat_url:
+                try:
+                    shared_jobs = self.db.get_jobs_by_chat_url(job.chat_url)
+                    # Filter by video_title to avoid mixing up unrelated jobs that got mapped due to the historical redirect recovery bug
+                    shared_jobs = [j for j in shared_jobs if j.video_title == job.video_title]
+                    job_ids = [j.job_id for j in shared_jobs]
+                    if job.job_id in job_ids:
+                        video_idx = job_ids.index(job.job_id)
+                        logger.info(f"Job #{job.index} (ID: {job.job_id}) has video index {video_idx} in shared chat {job.chat_url} (filtered by video title)")
+                except Exception as e:
+                    logger.warning(f"Could not calculate video index: {e}")
+                    
             try:
-                success = worker.run_job(job, mode=worker_mode)
+                success = worker.run_job(job, mode=worker_mode, video_index=video_idx)
                 if success:
                     break
                 else:
@@ -338,6 +441,8 @@ class MainWindow(QMainWindow):
         self.download_dir = Path.home() / 'Documents' / 'dola_downloads'
         self.db_path = Path.home() / 'Documents' / 'dola_video_automation' / 'history.db'
         self.db = HistoryDatabase(self.db_path)
+        from dola_automation.reach_snap import init_reach_snap_db
+        init_reach_snap_db(self.db_path)
         self.backup_path = Path.home() / 'Documents' / 'dola_video_automation' / 'grow_snap_backup.json'
         
         self.jobs: List[PromptJob] = []
@@ -345,6 +450,7 @@ class MainWindow(QMainWindow):
         self.current_session_id: Optional[int] = None
         self.runner: Optional[BatchRunner] = None
         self.settings = AutomationSettings()
+        self.telemetry = TelemetryTracker(enabled=True)
         
         # Concurrency Warning States
         self._threads_warning_confirmed = False
@@ -381,19 +487,160 @@ class MainWindow(QMainWindow):
         self._refresh_lifetime_history()
         self._update_stats()
 
+    def _toggle_creative_panel(self):
+        visible = not self.panel_creative.isVisible()
+        self.panel_creative.setVisible(visible)
+        arrow = "▼" if visible else "▶"
+        self.btn_cat_creative.setText(f"CreativeSnap {arrow}")
+        self._on_nav_changed(11)
+
+    def _toggle_reach_panel(self):
+        visible = not self.panel_reach.isVisible()
+        self.panel_reach.setVisible(visible)
+        arrow = "▼" if visible else "▶"
+        self.btn_cat_reach.setText(f"ReachSnap {arrow}")
+        self._on_nav_changed(12)
+
     def _build_ui(self):
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        main_layout.setSpacing(15)
+        
+        # Main horizontal layout to split Sidebar and Content
+        root_layout = QHBoxLayout(central_widget)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
-        # 1. Header Row
+        # 1. Left Sidebar
+        sidebar_widget = QWidget(self)
+        sidebar_widget.setObjectName("sidebar")
+        sidebar_widget.setFixedWidth(240)
+        sidebar_layout = QVBoxLayout(sidebar_widget)
+        sidebar_layout.setContentsMargins(15, 20, 15, 20)
+        sidebar_layout.setSpacing(10)
+
+        # Clickable header button containing Logo + Text
+        self.btn_home_logo = QPushButton(self)
+        self.btn_home_logo.setObjectName("category_header")
+        self.btn_home_logo.setStyleSheet("text-align: left; padding: 5px 0px; font-size: 18px; font-weight: 800; color: #2ecc71;")
+        
+        icon_path = get_resource_path("resources/icon.png")
+        if icon_path.exists():
+            self.btn_home_logo.setIcon(QIcon(str(icon_path)))
+            from PyQt6.QtCore import QSize
+            self.btn_home_logo.setIconSize(QSize(28, 28))
+            
+        self.btn_home_logo.setText(" GrowSnap AI")
+        self.btn_home_logo.clicked.connect(lambda: self._on_nav_changed(9))
+        sidebar_layout.addWidget(self.btn_home_logo)
+
+        # Accordion: CreativeSnap
+        self.btn_cat_creative = QPushButton("CreativeSnap ▼", self)
+        self.btn_cat_creative.setObjectName("category_header")
+        self.btn_cat_creative.clicked.connect(self._toggle_creative_panel)
+        sidebar_layout.addWidget(self.btn_cat_creative)
+
+        self.panel_creative = QWidget(self)
+        panel_creative_layout = QVBoxLayout(self.panel_creative)
+        panel_creative_layout.setContentsMargins(0, 0, 0, 0)
+        panel_creative_layout.setSpacing(5)
+
+        self.btn_nav_platform_automator = QPushButton("AI Platform Automator", self)
+        self.btn_nav_platform_automator.setCheckable(True)
+        self.btn_nav_platform_automator.setChecked(True)
+        self.btn_nav_platform_automator.setObjectName("sub_nav_button")
+
+        self.btn_nav_dola = QPushButton("Dola Video Automation", self)
+        self.btn_nav_dola.setCheckable(True)
+        self.btn_nav_dola.setObjectName("sub_nav_button")
+
+        self.btn_nav_converter = QPushButton("Watermark Removal", self)
+        self.btn_nav_converter.setCheckable(True)
+        self.btn_nav_converter.setObjectName("sub_nav_button")
+
+        self.btn_nav_merger = QPushButton("Video Merger", self)
+        self.btn_nav_merger.setCheckable(True)
+        self.btn_nav_merger.setObjectName("sub_nav_button")
+
+        self.btn_nav_hook_factory = QPushButton("Viral Hook Factory", self)
+        self.btn_nav_hook_factory.setCheckable(True)
+        self.btn_nav_hook_factory.setObjectName("sub_nav_button")
+
+        self.btn_nav_profile_outliers = QPushButton("Profile Outliers", self)
+        self.btn_nav_profile_outliers.setCheckable(True)
+        self.btn_nav_profile_outliers.setObjectName("sub_nav_button")
+
+        self.btn_nav_hook_library = QPushButton("Hook Library", self)
+        self.btn_nav_hook_library.setCheckable(True)
+        self.btn_nav_hook_library.setObjectName("sub_nav_button")
+
+        self.btn_nav_voice_cloner = QPushButton("Voice Cloner & TTS", self)
+        self.btn_nav_voice_cloner.setCheckable(True)
+        self.btn_nav_voice_cloner.setObjectName("sub_nav_button")
+
+        self.btn_nav_script_to_video = QPushButton("Script-to-Video Agent", self)
+        self.btn_nav_script_to_video.setCheckable(True)
+        self.btn_nav_script_to_video.setObjectName("sub_nav_button")
+
+        panel_creative_layout.addWidget(self.btn_nav_platform_automator)
+        panel_creative_layout.addWidget(self.btn_nav_dola)
+        panel_creative_layout.addWidget(self.btn_nav_converter)
+        panel_creative_layout.addWidget(self.btn_nav_merger)
+        panel_creative_layout.addWidget(self.btn_nav_hook_factory)
+        panel_creative_layout.addWidget(self.btn_nav_profile_outliers)
+        panel_creative_layout.addWidget(self.btn_nav_hook_library)
+        panel_creative_layout.addWidget(self.btn_nav_voice_cloner)
+        panel_creative_layout.addWidget(self.btn_nav_script_to_video)
+        sidebar_layout.addWidget(self.panel_creative)
+
+        # Accordion: ReachSnap
+        self.btn_cat_reach = QPushButton("ReachSnap ▶", self)
+        self.btn_cat_reach.setObjectName("category_header")
+        self.btn_cat_reach.clicked.connect(self._toggle_reach_panel)
+        sidebar_layout.addWidget(self.btn_cat_reach)
+
+        self.panel_reach = QWidget(self)
+        self.panel_reach.setVisible(False)  # Collapsed by default
+        panel_reach_layout = QVBoxLayout(self.panel_reach)
+        panel_reach_layout.setContentsMargins(0, 0, 0, 0)
+        panel_reach_layout.setSpacing(5)
+
+        self.btn_nav_sms = QPushButton("SMS Gateway (httpSMS)", self)
+        self.btn_nav_sms.setCheckable(True)
+        self.btn_nav_sms.setObjectName("sub_nav_button")
+
+        self.btn_nav_whatsapp = QPushButton("WhatsApp Automation", self)
+        self.btn_nav_whatsapp.setCheckable(True)
+        self.btn_nav_whatsapp.setObjectName("sub_nav_button")
+
+        self.btn_nav_telephony = QPushButton("AI Voice Telephony", self)
+        self.btn_nav_telephony.setCheckable(True)
+        self.btn_nav_telephony.setObjectName("sub_nav_button")
+
+        self.btn_nav_gmaps_scraper = QPushButton("GMaps Leads Scraper", self)
+        self.btn_nav_gmaps_scraper.setCheckable(True)
+        self.btn_nav_gmaps_scraper.setObjectName("sub_nav_button")
+
+        panel_reach_layout.addWidget(self.btn_nav_sms)
+        panel_reach_layout.addWidget(self.btn_nav_whatsapp)
+        panel_reach_layout.addWidget(self.btn_nav_telephony)
+        panel_reach_layout.addWidget(self.btn_nav_gmaps_scraper)
+        sidebar_layout.addWidget(self.panel_reach)
+
+        sidebar_layout.addStretch()
+        root_layout.addWidget(sidebar_widget)
+
+        # 2. Right Content Panel
+        right_panel = QWidget(self)
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(20, 20, 20, 20)
+        right_layout.setSpacing(15)
+
+        # Header Row
         header_layout = QHBoxLayout()
         title_box = QVBoxLayout()
-        title_lbl = GradientLabel("GrowSnap Creative Suite", self)
-        title_lbl.setObjectName("title")
-        title_box.addWidget(title_lbl)
+        self.title_lbl = GradientLabel("AI Platform Automator", self)
+        self.title_lbl.setObjectName("title")
+        title_box.addWidget(self.title_lbl)
         header_layout.addLayout(title_box)
 
         header_layout.addStretch()
@@ -424,49 +671,30 @@ class MainWindow(QMainWindow):
         btn_refresh.clicked.connect(self._refresh_application)
         header_layout.addWidget(btn_refresh)
 
-        main_layout.addLayout(header_layout)
+        right_layout.addLayout(header_layout)
 
-        # 1.5 Master Navigation Bar
-        nav_layout = QHBoxLayout()
-        nav_layout.setSpacing(10)
-        nav_layout.setContentsMargins(0, 0, 0, 5)
-        
-        self.btn_nav_dola = QPushButton("Dola Video Automation", self)
-        self.btn_nav_dola.setCheckable(True)
-        self.btn_nav_dola.setChecked(True)
-        self.btn_nav_dola.setObjectName("nav_button")
-        
-        self.btn_nav_converter = QPushButton("Watermark Removal", self)
-        self.btn_nav_converter.setCheckable(True)
-        self.btn_nav_converter.setObjectName("nav_button")
-        
-        self.btn_nav_merger = QPushButton("Video Merger", self)
-        self.btn_nav_merger.setCheckable(True)
-        self.btn_nav_merger.setObjectName("nav_button")
-        
-        self.btn_nav_hook_factory = QPushButton("Viral Hook Factory", self)
-        self.btn_nav_hook_factory.setCheckable(True)
-        self.btn_nav_hook_factory.setObjectName("nav_button")
-        
+        # Button groups mapping buttons to page indexes
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
-        self.nav_group.addButton(self.btn_nav_dola, 0)
-        self.nav_group.addButton(self.btn_nav_converter, 1)
-        self.nav_group.addButton(self.btn_nav_merger, 2)
-        self.nav_group.addButton(self.btn_nav_hook_factory, 3)
+        self.nav_group.addButton(self.btn_nav_platform_automator, 0)
+        self.nav_group.addButton(self.btn_nav_dola, 1)
+        self.nav_group.addButton(self.btn_nav_converter, 2)
+        self.nav_group.addButton(self.btn_nav_merger, 3)
+        self.nav_group.addButton(self.btn_nav_hook_factory, 4)
+        self.nav_group.addButton(self.btn_nav_profile_outliers, 5)
+        self.nav_group.addButton(self.btn_nav_hook_library, 6)
+        self.nav_group.addButton(self.btn_nav_sms, 7)
+        self.nav_group.addButton(self.btn_nav_whatsapp, 8)
+        self.nav_group.addButton(self.btn_nav_telephony, 9)
+        self.nav_group.addButton(self.btn_nav_voice_cloner, 13)
+        self.nav_group.addButton(self.btn_nav_gmaps_scraper, 14)
+        self.nav_group.addButton(self.btn_nav_script_to_video, 15)
         self.nav_group.idClicked.connect(self._on_nav_changed)
-        
-        nav_layout.addWidget(self.btn_nav_dola)
-        nav_layout.addWidget(self.btn_nav_converter)
-        nav_layout.addWidget(self.btn_nav_merger)
-        nav_layout.addWidget(self.btn_nav_hook_factory)
-        nav_layout.addStretch()
-        
-        main_layout.addLayout(nav_layout)
 
-        # 1.6 Stacked Widget Page Setup
+        # Stacked Widget Page Setup
         self.stacked_widget = QStackedWidget(self)
-        main_layout.addWidget(self.stacked_widget)
+        right_layout.addWidget(self.stacked_widget)
+        root_layout.addWidget(right_panel)
 
         # ─── PAGE 1: DOLA VIDEO AUTOMATION ───────────────────
         self.page_dola = QWidget(central_widget)
@@ -603,7 +831,7 @@ class MainWindow(QMainWindow):
         self.spin_threads = QSpinBox(self)
         self.spin_threads.setRange(1, 16)
         self.spin_threads.setValue(1)
-        self.spin_threads.valueChanged.connect(self._update_runner_settings)
+        self.spin_threads.valueChanged.connect(self._on_threads_changed)
         settings_grid.addWidget(self.spin_threads, 3, 1)
 
         settings_grid.addWidget(QLabel("Duration", self), 3, 2)
@@ -658,7 +886,7 @@ class MainWindow(QMainWindow):
         settings_grid.addWidget(QLabel("Watermark Method", self), 7, 0)
         self.combo_watermark_method = QComboBox(self)
         self.combo_watermark_method.addItems(["Blur", "Crop"])
-        self.combo_watermark_method.currentTextChanged.connect(self._update_runner_settings)
+        self.combo_watermark_method.currentTextChanged.connect(self._on_left_watermark_method_changed)
         settings_grid.addWidget(self.combo_watermark_method, 7, 1)
 
         settings_grid.addWidget(QLabel("Model", self), 7, 2)
@@ -667,28 +895,41 @@ class MainWindow(QMainWindow):
         self.combo_model.currentTextChanged.connect(self._update_runner_settings)
         settings_grid.addWidget(self.combo_model, 7, 3)
 
-        settings_grid.addWidget(QLabel("Download Folder", self), 8, 0)
+        settings_grid.addWidget(QLabel("Watermark Preset", self), 8, 0)
+        self.combo_watermark_preset = QComboBox(self)
+        self.combo_watermark_preset.addItems(["Dola (SeaDance)", "HeyGen", "Runway (Gen-3)", "Luma (Dream Machine)", "Kling AI", "MiniMax (Hailuo)", "Pika", "NotebookLM", "Custom (Manual)"])
+        self.combo_watermark_preset.currentTextChanged.connect(self._on_left_preset_changed)
+        settings_grid.addWidget(self.combo_watermark_preset, 8, 1)
+
+        settings_grid.addWidget(QLabel("Download Folder", self), 8, 2)
+        h_lay_dl_dir = QHBoxLayout()
         self.btn_download_dir = QPushButton("Choose", self)
         self.btn_download_dir.clicked.connect(self._pick_download_dir)
-        settings_grid.addWidget(self.btn_download_dir, 8, 1)
+        self.btn_open_download_dir = QPushButton("📂 Open", self)
+        self.btn_open_download_dir.clicked.connect(lambda: self._open_folder_of_path(str(self.download_dir)))
+        h_lay_dl_dir.addWidget(self.btn_download_dir)
+        h_lay_dl_dir.addWidget(self.btn_open_download_dir)
+        settings_grid.addLayout(h_lay_dl_dir, 8, 3)
+
+        settings_grid.addWidget(QLabel("Download Dir:", self), 9, 0)
         self.lbl_download_dir_show = QLabel(str(self.download_dir.name), self)
         self.lbl_download_dir_show.setWordWrap(True)
-        settings_grid.addWidget(self.lbl_download_dir_show, 8, 2, 1, 2)
+        settings_grid.addWidget(self.lbl_download_dir_show, 9, 1, 1, 3)
 
-        settings_grid.addWidget(QLabel("Success Phrase", self), 9, 0)
+        settings_grid.addWidget(QLabel("Success Phrase", self), 10, 0)
         self.edit_success_phrase = QLineEdit(self)
         self.edit_success_phrase.setPlaceholderText("Enter success confirmation phrase...")
         self.edit_success_phrase.textChanged.connect(self._update_runner_settings)
-        settings_grid.addWidget(self.edit_success_phrase, 9, 1, 1, 3)
+        settings_grid.addWidget(self.edit_success_phrase, 10, 1, 1, 3)
 
         self.chk_prepend_hook = QCheckBox("Prepend Viral Hook", self)
         self.chk_prepend_hook.stateChanged.connect(self._update_runner_settings)
-        settings_grid.addWidget(self.chk_prepend_hook, 10, 0, 1, 2)
+        settings_grid.addWidget(self.chk_prepend_hook, 11, 0, 1, 2)
 
-        settings_grid.addWidget(QLabel("Select Hook", self), 10, 2)
+        settings_grid.addWidget(QLabel("Select Hook", self), 11, 2)
         self.combo_select_hook = QComboBox(self)
         self.combo_select_hook.currentIndexChanged.connect(self._update_runner_settings)
-        settings_grid.addWidget(self.combo_select_hook, 10, 3)
+        settings_grid.addWidget(self.combo_select_hook, 11, 3)
 
         # Operational buttons
         run_row = QHBoxLayout()
@@ -730,6 +971,43 @@ class MainWindow(QMainWindow):
         tab_current = QWidget(self)
         tab_current_layout = QVBoxLayout(tab_current)
         
+        # Excel-style Filter & Search Bar
+        filter_bar = QHBoxLayout()
+        filter_bar.setSpacing(10)
+        
+        lbl_filter_status = QLabel("Filter Status:", self)
+        lbl_filter_status.setStyleSheet("font-weight: bold; color: #2ecc71;")
+        filter_bar.addWidget(lbl_filter_status)
+        
+        self.combo_filter_status = CheckableComboBox(self)
+        self.combo_filter_status.add_checkable_item("All Statuses", checked=True)
+        self.combo_filter_status.add_checkable_item("Pending", checked=True)
+        self.combo_filter_status.add_checkable_item("Running", checked=True)
+        self.combo_filter_status.add_checkable_item("Waiting", checked=True)
+        self.combo_filter_status.add_checkable_item("Downloading", checked=True)
+        self.combo_filter_status.add_checkable_item("Completed", checked=True)
+        self.combo_filter_status.add_checkable_item("Submitted", checked=True)
+        self.combo_filter_status.add_checkable_item("Failed", checked=True)
+        self.combo_filter_status.add_checkable_item("Cancelled", checked=True)
+        self.combo_filter_status.add_checkable_item("Has Error Details", checked=True)
+        self.combo_filter_status.checkedItemsChanged.connect(self._apply_table_filters)
+        filter_bar.addWidget(self.combo_filter_status)
+        
+        lbl_search = QLabel("Search:", self)
+        lbl_search.setStyleSheet("font-weight: bold; color: #2ecc71; margin-left: 10px;")
+        filter_bar.addWidget(lbl_search)
+        
+        self.edit_filter_text = QLineEdit(self)
+        self.edit_filter_text.setPlaceholderText("Search rows by prompt, video title, status, error...")
+        self.edit_filter_text.textChanged.connect(self._apply_table_filters)
+        filter_bar.addWidget(self.edit_filter_text)
+        
+        self.btn_clear_filters = QPushButton("Clear Filters", self)
+        self.btn_clear_filters.clicked.connect(self._clear_table_filters)
+        filter_bar.addWidget(self.btn_clear_filters)
+        
+        tab_current_layout.addLayout(filter_bar)
+        
         self.table = QTableWidget(self)
         self.table.setColumnCount(9)
         headers = ["Index", "Video Title", "Scene Index", "Prompt", "Reference", "Status", "Download Path", "Error Details", "Action"]
@@ -758,6 +1036,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(5, 90)
         self.table.setColumnWidth(6, 140)
         self.table.setColumnWidth(7, 180)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -903,7 +1182,6 @@ class MainWindow(QMainWindow):
         # Balance sizes (Left Panel gets smaller portion, Right Panel gets larger)
         splitter.setSizes([450, 850])
         page_dola_layout.addWidget(splitter)
-        self.stacked_widget.addWidget(self.page_dola)
 
         # ─── PAGE 2: WATERMARK REMOVAL TOOL ──────────────────
         self.page_converter = QWidget(central_widget)
@@ -915,7 +1193,7 @@ class MainWindow(QMainWindow):
         lbl_conv_subtitle = QLabel("WATERMARK REMOVAL TOOL — Visually Lossless Watermark Blurring & Cropping", self)
         lbl_conv_subtitle.setObjectName("subtitle")
         self.btn_conv_help = QPushButton("Help / Instructions", self)
-        self.btn_conv_help.setFixedWidth(160)
+        self.btn_conv_help.setMinimumWidth(180)
         self.btn_conv_help.clicked.connect(self._show_conv_help_dialog)
         conv_header_layout.addWidget(lbl_conv_subtitle)
         conv_header_layout.addStretch()
@@ -936,56 +1214,76 @@ class MainWindow(QMainWindow):
         conv_grid.addWidget(self.btn_conv_input, 0, 0)
         self.lbl_conv_input = QLabel("No input selected", self)
         self.lbl_conv_input.setWordWrap(True)
-        conv_grid.addWidget(self.lbl_conv_input, 0, 1, 1, 3)
+        conv_grid.addWidget(self.lbl_conv_input, 0, 1, 1, 2)
+        
+        self.btn_open_conv_input = QPushButton("📂 Open", self)
+        self.btn_open_conv_input.clicked.connect(lambda: self._open_folder_of_path(self.lbl_conv_input.text()))
+        conv_grid.addWidget(self.btn_open_conv_input, 0, 3)
 
         self.btn_conv_output = QPushButton("Select Output Folder", self)
         self.btn_conv_output.clicked.connect(self._pick_conv_output)
         conv_grid.addWidget(self.btn_conv_output, 1, 0)
         self.lbl_conv_output = QLabel("No output selected", self)
         self.lbl_conv_output.setWordWrap(True)
-        conv_grid.addWidget(self.lbl_conv_output, 1, 1, 1, 3)
+        conv_grid.addWidget(self.lbl_conv_output, 1, 1, 1, 2)
+        
+        self.btn_open_conv_output = QPushButton("📂 Open", self)
+        self.btn_open_conv_output.clicked.connect(lambda: self._open_folder_of_path(self.lbl_conv_output.text()))
+        conv_grid.addWidget(self.btn_open_conv_output, 1, 3)
 
-        conv_grid.addWidget(QLabel("Mode", self), 2, 0)
+        conv_grid.addWidget(QLabel("Preset Platform", self), 2, 0)
+        self.combo_conv_preset = QComboBox(self)
+        self.combo_conv_preset.addItems(["Dola (SeaDance)", "HeyGen", "Runway (Gen-3)", "Luma (Dream Machine)", "Kling AI", "MiniMax (Hailuo)", "Pika", "NotebookLM", "Custom (Manual)"])
+        self.combo_conv_preset.currentTextChanged.connect(self._on_conv_preset_changed)
+        conv_grid.addWidget(self.combo_conv_preset, 2, 1, 1, 3)
+
+        conv_grid.addWidget(QLabel("Mode", self), 3, 0)
         self.combo_conv_mode = QComboBox(self)
         self.combo_conv_mode.addItems(["Folder Batch", "Single Video"])
-        conv_grid.addWidget(self.combo_conv_mode, 2, 1)
+        conv_grid.addWidget(self.combo_conv_mode, 3, 1)
 
-        conv_grid.addWidget(QLabel("Method", self), 2, 2)
+        conv_grid.addWidget(QLabel("Method", self), 3, 2)
         self.combo_conv_method = QComboBox(self)
         self.combo_conv_method.addItems(["Blur", "Crop"])
-        conv_grid.addWidget(self.combo_conv_method, 2, 3)
+        self.combo_conv_method.currentTextChanged.connect(self._on_conv_method_changed)
+        conv_grid.addWidget(self.combo_conv_method, 3, 3)
 
-        conv_grid.addWidget(QLabel("Blur X:Y:W:H", self), 3, 0)
+        conv_grid.addWidget(QLabel("Blur X:Y:W:H", self), 4, 0)
         blur_hlay = QHBoxLayout()
         self.spin_blur_x = QSpinBox(self)
         self.spin_blur_x.setRange(0, 4000)
         self.spin_blur_x.setValue(540)
+        self.spin_blur_x.valueChanged.connect(self._on_manual_watermark_change)
         self.spin_blur_y = QSpinBox(self)
         self.spin_blur_y.setRange(0, 4000)
         self.spin_blur_y.setValue(1220)
+        self.spin_blur_y.valueChanged.connect(self._on_manual_watermark_change)
         self.spin_blur_w = QSpinBox(self)
         self.spin_blur_w.setRange(0, 2000)
         self.spin_blur_w.setValue(170)
+        self.spin_blur_w.valueChanged.connect(self._on_manual_watermark_change)
         self.spin_blur_h = QSpinBox(self)
         self.spin_blur_h.setRange(0, 2000)
         self.spin_blur_h.setValue(80)
+        self.spin_blur_h.valueChanged.connect(self._on_manual_watermark_change)
         blur_hlay.addWidget(self.spin_blur_x)
         blur_hlay.addWidget(self.spin_blur_y)
         blur_hlay.addWidget(self.spin_blur_w)
         blur_hlay.addWidget(self.spin_blur_h)
-        conv_grid.addLayout(blur_hlay, 3, 1, 1, 3)
+        conv_grid.addLayout(blur_hlay, 4, 1, 1, 3)
 
-        conv_grid.addWidget(QLabel("Crop Bottom Px", self), 4, 0)
+        conv_grid.addWidget(QLabel("Crop Bottom Px", self), 5, 0)
         self.spin_crop_px = QSpinBox(self)
         self.spin_crop_px.setRange(0, 1000)
         self.spin_crop_px.setValue(80)
-        conv_grid.addWidget(self.spin_crop_px, 4, 1)
+        self.spin_crop_px.valueChanged.connect(self._on_manual_watermark_change)
+        conv_grid.addWidget(self.spin_crop_px, 5, 1)
 
-        conv_grid.addWidget(QLabel("Threads", self), 4, 2)
+        conv_grid.addWidget(QLabel("Threads", self), 5, 2)
         self.spin_conv_threads = QSpinBox(self)
         self.spin_conv_threads.setRange(1, 16)
         self.spin_conv_threads.setValue(4)
-        conv_grid.addWidget(self.spin_conv_threads, 4, 3)
+        conv_grid.addWidget(self.spin_conv_threads, 5, 3)
 
         converter_layout.addWidget(conv_settings_group)
 
@@ -1004,7 +1302,6 @@ class MainWindow(QMainWindow):
         converter_layout.addWidget(self.conv_log)
 
         page_conv_layout.addWidget(tab_converter)
-        self.stacked_widget.addWidget(self.page_converter)
 
         # ─── PAGE 3: VIDEO MERGER ────────────────────────────
         self.page_merger = QWidget(central_widget)
@@ -1016,7 +1313,7 @@ class MainWindow(QMainWindow):
         lbl_merge_subtitle = QLabel("VIDEO MERGER — Concatenate video segments losslessly", self)
         lbl_merge_subtitle.setObjectName("subtitle")
         self.btn_merge_help = QPushButton("Help / Instructions", self)
-        self.btn_merge_help.setFixedWidth(160)
+        self.btn_merge_help.setMinimumWidth(180)
         self.btn_merge_help.clicked.connect(self._show_merge_help_dialog)
         merge_header_layout.addWidget(lbl_merge_subtitle)
         merge_header_layout.addStretch()
@@ -1079,15 +1376,119 @@ class MainWindow(QMainWindow):
         merger_layout.addWidget(self.merger_log)
 
         page_merge_layout.addWidget(tab_merger)
-        self.stacked_widget.addWidget(self.page_merger)
 
         # ─── PAGE 4: VIRAL HOOK FACTORY ──────────────────────
         self.page_hook_factory = ViralHookFactoryWidget(self, self.db, self.settings)
         self.page_hook_factory.hook_saved_signal.connect(self._refresh_hooks_combobox)
-        self.stacked_widget.addWidget(self.page_hook_factory)
+
+        # ─── PAGE 4B: PROFILE OUTLIERS & PERFORMANCE ANALYZER ──
+        self.page_profile_outliers = ProfileOutliersWidget(self, self.db, self.settings)
+        self.page_profile_outliers.load_url_to_downloader.connect(self._on_load_url_to_downloader)
+
+        # ─── PAGE 4C: SAVED HOOK LIBRARY & CATALOGUE ───────────
+        self.page_hook_library = HookLibraryWidget(self, self.db, self.settings)
+        self.page_hook_library.select_hook_for_merging.connect(self._on_select_hook_for_merging)
+        
+        # When a hook is cropped and saved in hook_factory, automatically refresh the hook library cards
+        self.page_hook_factory.hook_saved_signal.connect(self.page_hook_library._load_saved_hooks)
+
+        # ─── PAGE 5: PLATFORM AUTOMATOR ──────────────────────
+        from dola_automation.platform_automator import PlatformAutomatorWidget
+        self.page_platform_automator = PlatformAutomatorWidget(self)
+
+        # Stacked Widget Page Ordering
+        self.stacked_widget.addWidget(self.page_platform_automator) # Index 0
+        self.stacked_widget.addWidget(self.page_dola)                # Index 1
+        self.stacked_widget.addWidget(self.page_converter)           # Index 2
+        self.stacked_widget.addWidget(self.page_merger)              # Index 3
+        self.stacked_widget.addWidget(self.page_hook_factory)         # Index 4
+        self.stacked_widget.addWidget(self.page_profile_outliers)     # Index 5
+        self.stacked_widget.addWidget(self.page_hook_library)         # Index 6
+
+        # ─── PAGE 5, 6, 7: REACHSNAP MODULES ──────────────────
+        from dola_automation.reach_snap import SMSGatewayWidget, WhatsAppAutomationWidget, VoiceTelephonyWidget
+        self.page_sms_gateway = SMSGatewayWidget(self, self.db_path, self.settings)
+        self.page_whatsapp_automation = WhatsAppAutomationWidget(self, self.db_path, self.settings)
+        self.page_voice_telephony = VoiceTelephonyWidget(self, self.db_path, self.settings)
+
+        self.stacked_widget.addWidget(self.page_sms_gateway)         # Index 7
+        self.stacked_widget.addWidget(self.page_whatsapp_automation) # Index 8
+        self.stacked_widget.addWidget(self.page_voice_telephony)     # Index 9
+
+        # ─── PAGE 8, 9, 10: CATEGORY OVERVIEW DASHBOARDS ──────
+        from dola_automation.dashboards import MasterHomeDashboardWidget, CreativeDashboardWidget, ReachDashboardWidget
+        self.page_master_dashboard = MasterHomeDashboardWidget(self, self.db_path)
+        self.page_creative_dashboard = CreativeDashboardWidget(self, self.db_path)
+        self.page_reach_dashboard = ReachDashboardWidget(self, self.db_path)
+
+        self.stacked_widget.addWidget(self.page_master_dashboard)     # Index 10
+        self.stacked_widget.addWidget(self.page_creative_dashboard)   # Index 11
+        self.stacked_widget.addWidget(self.page_reach_dashboard)      # Index 12
+
+        # ─── PHASE 2 PIPELINE PIPES ──────────────────────────
+        from dola_automation.phase2_widgets import VoiceClonerWidget, GMapsScraperWidget, ScriptToVideoAgentWidget
+        self.page_voice_cloner = VoiceClonerWidget(self, self.db_path, self.settings)
+        self.page_gmaps_scraper = GMapsScraperWidget(self, self.db_path, self.settings)
+        self.page_script_to_video = ScriptToVideoAgentWidget(self, self.db_path, self.settings)
+
+        self.stacked_widget.addWidget(self.page_voice_cloner)         # Index 13
+        self.stacked_widget.addWidget(self.page_gmaps_scraper)        # Index 14
+        self.stacked_widget.addWidget(self.page_script_to_video)       # Index 15
 
     def _on_nav_changed(self, button_id):
         self.stacked_widget.setCurrentIndex(button_id)
+        
+        titles = {
+            0: "AI Platform Automator",
+            1: "Dola Video Automation",
+            2: "Watermark Removal",
+            3: "Video Merger",
+            4: "Viral Hook Factory",
+            5: "Profile Outliers",
+            6: "Hook Library",
+            7: "SMS Gateway (httpSMS)",
+            8: "WhatsApp Automation",
+            9: "AI Voice Telephony",
+            10: "GrowSnap AI Dashboard",
+            11: "CreativeSnap Dashboard",
+            12: "ReachSnap Dashboard",
+            13: "Voice Cloner & TTS Engine",
+            14: "Google Maps Leads Scraper",
+            15: "Autonomous Script-to-Video Agent"
+        }
+        if hasattr(self, 'title_lbl'):
+            self.title_lbl.setText(titles.get(button_id, "GrowSnap AI"))
+            
+        # Keep button states in sync
+        if 10 <= button_id <= 12:
+            self.nav_group.setExclusive(False)
+            for btn in self.nav_group.buttons():
+                btn.setChecked(False)
+            self.nav_group.setExclusive(True)
+        else:
+            btn = self.nav_group.button(button_id)
+            if btn:
+                btn.setChecked(True)
+
+    def _on_load_url_to_downloader(self, url: str):
+        # Switch to Viral Hook Factory (page index 4)
+        self._on_nav_changed(4)
+        # Select "Media Downloader" tab (Index 0) on the tab widget
+        self.page_hook_factory.tabs.setCurrentIndex(0)
+        # Set text to the input field
+        self.page_hook_factory.edit_url.setText(url)
+        # Log it to the downloader log console
+        self.page_hook_factory.log_downloader.appendPlainText(f"Received outlier URL from Analyzer: {url}")
+
+    def _on_select_hook_for_merging(self, file_path: str, hook_title: str):
+        # Switch to Viral Hook Factory (page index 4)
+        self._on_nav_changed(4)
+        # Select "Hook Merger" tab (Index 2) on the tab widget
+        self.page_hook_factory.tabs.setCurrentIndex(2)
+        # Set text to the hook file path
+        self.page_hook_factory.edit_merge_hook.setText(file_path)
+        # Log it to the merger log console
+        self.page_hook_factory.log_merger.appendPlainText(f"Selected hook '{hook_title}' from Saved Library.")
 
     def _stat_card(self, label_text: str, default_val: str) -> QFrame:
         card = QFrame(self)
@@ -1133,28 +1534,18 @@ class MainWindow(QMainWindow):
         s.prepend_viral_hook = self.chk_prepend_hook.isChecked()
         s.selected_hook_id = self.combo_select_hook.currentData() or -1
         
-        # Coordinates
-        s.watermark_blur_x = 540
-        s.watermark_blur_y = 1220
-        s.watermark_blur_w = 170
-        s.watermark_blur_h = 80
-        s.watermark_crop_pixels = 80
+        # Coordinates from right page spinboxes and preset from combo
+        s.watermark_blur_x = self.spin_blur_x.value()
+        s.watermark_blur_y = self.spin_blur_y.value()
+        s.watermark_blur_w = self.spin_blur_w.value()
+        s.watermark_blur_h = self.spin_blur_h.value()
+        s.watermark_crop_pixels = self.spin_crop_px.value()
+        s.watermark_preset = self.combo_watermark_preset.currentText()
         return s
 
     def _update_runner_settings(self):
-        if getattr(self, '_is_loading_backup', False):
-            s = self._collect_settings()
-            self.settings.thread_count = s.thread_count
-        else:
-            new_threads = self.spin_threads.value()
-            if new_threads > 1 and not getattr(self, '_threads_warning_confirmed', False):
-                self._trigger_threads_warning()
-                if not getattr(self, '_threads_warning_confirmed', False):
-                    self.spin_threads.blockSignals(True)
-                    self.spin_threads.setValue(1)
-                    self.spin_threads.blockSignals(False)
-            s = self._collect_settings()
-            self.settings.thread_count = s.thread_count
+        s = self._collect_settings()
+        self.settings.thread_count = s.thread_count
 
         self.settings.one_browser_per_video = s.one_browser_per_video
         self.settings.headless = s.headless
@@ -1181,14 +1572,93 @@ class MainWindow(QMainWindow):
         
     def _enforce_license_limits(self):
         from dola_automation.licensing import check_license_stored
+    def _enforce_license_limits(self):
+        from dola_automation.licensing import check_license_stored
         is_valid, lic_data = check_license_stored()
         plan_name = lic_data.get('plan', '1-Day Trial') if is_valid else '1-Day Trial'
         
+        # Call Hook Factory plan tab enforcements
+        if hasattr(self, 'page_hook_factory'):
+            self.page_hook_factory.enforce_plan_limits(plan_name)
+            
         if plan_name == '1-Day Trial':
-            self.settings.auto_remove_watermark = False
+            # 1-Day Trial limits (Thread limit = 1, CSV disabled, Watermark Auto-remove disabled)
+            self.spin_threads.blockSignals(True)
+            self.spin_threads.setValue(1)
+            self.spin_threads.setRange(1, 1)
+            self.spin_threads.setEnabled(False)
+            self.spin_threads.setToolTip("Multi-threaded generation is disabled in the 1-Day Trial plan.")
+            self.spin_threads.blockSignals(False)
+            
+            self.btn_load_file.setEnabled(False)
+            self.btn_load_path.setEnabled(False)
+            self.edit_file_path.setEnabled(False)
+            self.btn_load_file.setToolTip("CSV bulk load is disabled in the 1-Day Trial plan.")
+            
+            self.chk_auto_remove_watermark.blockSignals(True)
             self.chk_auto_remove_watermark.setChecked(False)
             self.chk_auto_remove_watermark.setEnabled(False)
             self.chk_auto_remove_watermark.setToolTip("Auto-remove watermark is disabled in the 1-Day Trial plan.")
+            self.chk_auto_remove_watermark.blockSignals(False)
+            
+            if hasattr(self, 'combo_conv_mode'):
+                self.combo_conv_mode.setEnabled(False)
+                
+            self.chk_prepend_hook.blockSignals(True)
+            self.chk_prepend_hook.setChecked(False)
+            self.chk_prepend_hook.setEnabled(False)
+            self.chk_prepend_hook.setToolTip("Prepend Hook is disabled in the 1-Day Trial plan.")
+            self.chk_prepend_hook.blockSignals(False)
+            
+        elif plan_name == 'Creator Plan':
+            # Creator Plan limits (Thread limit = 5, CSV enabled (500 max batch size), Watermark enabled, Prepend disabled)
+            self.spin_threads.blockSignals(True)
+            if self.spin_threads.value() > 5:
+                self.spin_threads.setValue(5)
+            self.spin_threads.setRange(1, 5)
+            self.spin_threads.setEnabled(True)
+            self.spin_threads.setToolTip("Creator Plan allows up to 5 concurrent threads. Upgrade to Studio Pro for up to 16 threads!")
+            self.spin_threads.blockSignals(False)
+            
+            self.btn_load_file.setEnabled(True)
+            self.btn_load_path.setEnabled(True)
+            self.edit_file_path.setEnabled(True)
+            self.btn_load_file.setToolTip("Import batch prompts from CSV or TXT file (Max 500 prompts per batch for Creator Plan)")
+            
+            self.chk_auto_remove_watermark.setEnabled(True)
+            self.chk_auto_remove_watermark.setToolTip("Toggle auto-watermark removal on generated files")
+            
+            if hasattr(self, 'combo_conv_mode'):
+                self.combo_conv_mode.setEnabled(True)
+                self.combo_conv_mode.setToolTip("Select watermark removal processing mode")
+                
+            # Auto-prepend hook pipeline belongs to Studio Pro (disabled for Creator)
+            self.chk_prepend_hook.blockSignals(True)
+            self.chk_prepend_hook.setChecked(False)
+            self.chk_prepend_hook.setEnabled(False)
+            self.chk_prepend_hook.setToolTip("Auto-prepend viral hooks is a Studio Pro feature. Upgrade to unlock!")
+            self.chk_prepend_hook.blockSignals(False)
+            
+        else:
+            # Studio Pro (Unlimited features, up to 16 threads)
+            self.spin_threads.setEnabled(True)
+            self.spin_threads.setRange(1, 16)
+            self.spin_threads.setToolTip("Set number of parallel browser threads (up to 16)")
+            
+            self.btn_load_file.setEnabled(True)
+            self.btn_load_path.setEnabled(True)
+            self.edit_file_path.setEnabled(True)
+            self.btn_load_file.setToolTip("Import batch prompts from CSV or TXT file (Unlimited size)")
+            
+            self.chk_auto_remove_watermark.setEnabled(True)
+            self.chk_auto_remove_watermark.setToolTip("Toggle auto-watermark removal on generated files")
+            
+            if hasattr(self, 'combo_conv_mode'):
+                self.combo_conv_mode.setEnabled(True)
+                self.combo_conv_mode.setToolTip("Select watermark removal processing mode")
+                
+            self.chk_prepend_hook.setEnabled(True)
+            self.chk_prepend_hook.setToolTip("Prepend selected viral hook to the start of generated videos")
 
     def _trigger_threads_warning(self):
         if getattr(self, '_showing_warning_dialog', False):
@@ -1259,6 +1729,12 @@ class MainWindow(QMainWindow):
                 'generation_timeout_sec': self.spin_timeout.value(),
                 'auto_download_delay': self.spin_auto_download_delay.value(),
                 'watermark_method': self.combo_watermark_method.currentText(),
+                'watermark_preset': self.combo_watermark_preset.currentText(),
+                'watermark_blur_x': self.spin_blur_x.value(),
+                'watermark_blur_y': self.spin_blur_y.value(),
+                'watermark_blur_w': self.spin_blur_w.value(),
+                'watermark_blur_h': self.spin_blur_h.value(),
+                'watermark_crop_pixels': self.spin_crop_px.value(),
                 'download_dir': str(self.download_dir),
                 'generation_success_phrase': self.edit_success_phrase.text()
             }
@@ -1297,7 +1773,23 @@ class MainWindow(QMainWindow):
             self.spin_paste_delay.setValue(data.get('paste_delay_sec', 2))
             self.spin_timeout.setValue(data.get('generation_timeout_sec', 500))
             self.spin_auto_download_delay.setValue(data.get('auto_download_delay', 5))
+            
+            # Load watermark preset and coordinates
+            preset = data.get('watermark_preset', 'Dola (SeaDance)')
+            if preset == "Dola":
+                preset = "Dola (SeaDance)"
+            self.combo_watermark_preset.setCurrentText(preset)
+            self.combo_conv_preset.setCurrentText(preset)
+            
+            # Restore method and spinboxes (Custom case is preserved)
             self.combo_watermark_method.setCurrentText(data.get('watermark_method', 'Blur'))
+            self.combo_conv_method.setCurrentText(data.get('watermark_method', 'Blur'))
+            self.spin_blur_x.setValue(data.get('watermark_blur_x', 540))
+            self.spin_blur_y.setValue(data.get('watermark_blur_y', 1220))
+            self.spin_blur_w.setValue(data.get('watermark_blur_w', 170))
+            self.spin_blur_h.setValue(data.get('watermark_blur_h', 80))
+            self.spin_crop_px.setValue(data.get('watermark_crop_pixels', 80))
+            
             self.edit_success_phrase.setText(data.get('generation_success_phrase', 'will be generated using'))
             
             d_dir = data.get('download_dir', '')
@@ -1383,6 +1875,20 @@ class MainWindow(QMainWindow):
         if not parsed:
             QMessageBox.warning(self, "Failed to parse", "No valid prompts or CSV rows parsed. Check format.")
             return
+
+        # Check plan limits (Creator Plan max 500 prompts per batch)
+        from dola_automation.licensing import check_license_stored
+        is_valid, lic_data = check_license_stored()
+        plan_name = lic_data.get('plan', '1-Day Trial') if is_valid else '1-Day Trial'
+        
+        if plan_name in ['1-Day Trial', 'Creator Plan'] and len(parsed) > 500:
+            QMessageBox.warning(
+                self, 
+                "Plan Batch Limit Reached", 
+                "Creator Plan Limit: Ingestion of prompts is capped at 500 per batch.\n\n"
+                "Your list has been truncated to the first 500 prompts. Please upgrade to Studio Pro for unlimited batch ingestion sizes!"
+            )
+            parsed = parsed[:500]
 
         self.jobs.clear()
         ref_images = align_reference_images(parsed, self.reference_paths)
@@ -1505,6 +2011,7 @@ class MainWindow(QMainWindow):
                 self.table.setCellWidget(i, 8, btn_cell)
         finally:
             self.table.blockSignals(False)
+        self._apply_table_filters()
 
     def _on_table_item_changed(self, item):
         if not item:
@@ -2634,6 +3141,9 @@ class MainWindow(QMainWindow):
         self.conv_progress.setValue(0)
         self.conv_log.clear()
 
+        # Report watermark removal to telemetry
+        self.telemetry.report_watermark_job(method=method, files_count=len(input_paths))
+
         self.conv_worker = ConverterWorker(
             input_paths=input_paths,
             output_dir=Path(out_str),
@@ -2709,6 +3219,9 @@ class MainWindow(QMainWindow):
         self.btn_merge_start.setEnabled(False)
         self.merger_progress.setValue(0)
         self.merger_log.clear()
+
+        # Report video merger operation to telemetry
+        self.telemetry.report_merger_job(files_count=len(input_paths))
         
         self.merger_worker = MergerWorker(input_paths, out_path)
         self.merger_worker.log.connect(self.merger_log.appendPlainText)
@@ -2746,13 +3259,234 @@ class MainWindow(QMainWindow):
         dlg = SupportDialog(self)
         dlg.exec()
 
+    def _on_threads_changed(self, value):
+        if not getattr(self, '_is_loading_backup', False):
+            if value > 1 and not getattr(self, '_threads_warning_confirmed', False):
+                self._trigger_threads_warning()
+        self._update_runner_settings()
+
+    def _apply_table_filters(self):
+        # Prevent crash if widgets are not initialized yet
+        if not hasattr(self, 'combo_filter_status') or not hasattr(self, 'edit_filter_text'):
+            return
+            
+        checked_statuses = self.combo_filter_status.get_checked_items()
+        search_text = self.edit_filter_text.text().strip().lower()
+        
+        for row in range(self.table.rowCount()):
+            # Get values
+            status_item = self.table.item(row, 5) # column 5 is Status
+            status_val = status_item.text().lower() if status_item else ""
+            
+            title_item = self.table.item(row, 1) # column 1 is Video Title
+            title_val = title_item.text().lower() if title_item else ""
+            
+            prompt_item = self.table.item(row, 3) # column 3 is Prompt
+            prompt_val = prompt_item.text().lower() if prompt_item else ""
+            
+            err_item = self.table.item(row, 7) # column 7 is Error Details
+            err_val = err_item.text().lower() if err_item else ""
+            
+            # Status check
+            status_match = False
+            if not checked_statuses:
+                status_match = True
+            elif "all statuses" in checked_statuses:
+                status_match = True
+            elif "has error details" in checked_statuses:
+                status_match = (len(err_val) > 0 and err_val != "-") or (status_val in checked_statuses)
+            else:
+                status_match = (status_val in checked_statuses)
+                
+            # Search check
+            search_match = True
+            if search_text:
+                search_match = (
+                    search_text in title_val or 
+                    search_text in prompt_val or 
+                    search_text in err_val or
+                    search_text in status_val
+                )
+                
+            # Hide/show row
+            self.table.setRowHidden(row, not (status_match and search_match))
+
+    def _clear_table_filters(self):
+        all_items = [
+            "all statuses", 
+            "pending", 
+            "running", 
+            "waiting", 
+            "downloading", 
+            "completed", 
+            "submitted", 
+            "failed", 
+            "cancelled", 
+            "has error details"
+        ]
+        self.combo_filter_status.set_checked_items(all_items)
+        self.edit_filter_text.clear()
+        self._apply_table_filters()
+
+    def _on_conv_preset_changed(self, text):
+        presets = {
+            "Dola (SeaDance)": {
+                "method": "Blur",
+                "blur_x": 520,
+                "blur_y": 1200,
+                "blur_w": 190,
+                "blur_h": 80,
+                "crop_px": 90
+            },
+            "HeyGen": {
+                "method": "Blur",
+                "blur_x": 460,
+                "blur_y": 1130,
+                "blur_w": 250,
+                "blur_h": 130,
+                "crop_px": 150
+            },
+            "Runway (Gen-3)": {
+                "method": "Blur",
+                "blur_x": 480,
+                "blur_y": 1160,
+                "blur_w": 220,
+                "blur_h": 110,
+                "crop_px": 120
+            },
+            "Luma (Dream Machine)": {
+                "method": "Blur",
+                "blur_x": 500,
+                "blur_y": 1180,
+                "blur_w": 210,
+                "blur_h": 95,
+                "crop_px": 100
+            },
+            "Kling AI": {
+                "method": "Blur",
+                "blur_x": 520,
+                "blur_y": 15,
+                "blur_w": 190,
+                "blur_h": 80,
+                "crop_px": 100
+            },
+            "MiniMax (Hailuo)": {
+                "method": "Blur",
+                "blur_x": 480,
+                "blur_y": 1160,
+                "blur_w": 220,
+                "blur_h": 110,
+                "crop_px": 120
+            },
+            "Pika": {
+                "method": "Blur",
+                "blur_x": 500,
+                "blur_y": 1180,
+                "blur_w": 210,
+                "blur_h": 90,
+                "crop_px": 100
+            },
+            "NotebookLM": {
+                "method": "Blur",
+                "blur_x": 520,
+                "blur_y": 1200,
+                "blur_w": 180,
+                "blur_h": 75,
+                "crop_px": 80
+            }
+        }
+        
+        if text in presets:
+            p = presets[text]
+            # Block signals temporarily to prevent circular updates
+            self.combo_conv_method.blockSignals(True)
+            self.spin_blur_x.blockSignals(True)
+            self.spin_blur_y.blockSignals(True)
+            self.spin_blur_w.blockSignals(True)
+            self.spin_blur_h.blockSignals(True)
+            self.spin_crop_px.blockSignals(True)
+            
+            self.combo_conv_method.setCurrentText(p["method"])
+            self.spin_blur_x.setValue(p["blur_x"])
+            self.spin_blur_y.setValue(p["blur_y"])
+            self.spin_blur_w.setValue(p["blur_w"])
+            self.spin_blur_h.setValue(p["blur_h"])
+            self.spin_crop_px.setValue(p["crop_px"])
+            
+            self.combo_conv_method.blockSignals(False)
+            self.spin_blur_x.blockSignals(False)
+            self.spin_blur_y.blockSignals(False)
+            self.spin_blur_w.blockSignals(False)
+            self.spin_blur_h.blockSignals(False)
+            self.spin_crop_px.blockSignals(False)
+            
+            # Sync with Left panel watermark method
+            if hasattr(self, 'combo_watermark_method'):
+                self.combo_watermark_method.blockSignals(True)
+                self.combo_watermark_method.setCurrentText(p["method"])
+                self.combo_watermark_method.blockSignals(False)
+                
+            # Update Left preset selection if different
+            if hasattr(self, 'combo_watermark_preset'):
+                self.combo_watermark_preset.blockSignals(True)
+                self.combo_watermark_preset.setCurrentText(text)
+                self.combo_watermark_preset.blockSignals(False)
+                
+            self._update_runner_settings()
+
+    def _on_conv_method_changed(self, text):
+        if hasattr(self, 'combo_watermark_method'):
+            self.combo_watermark_method.blockSignals(True)
+            self.combo_watermark_method.setCurrentText(text)
+            self.combo_watermark_method.blockSignals(False)
+        self._on_manual_watermark_change()
+
+    def _on_left_preset_changed(self, text):
+        if hasattr(self, 'combo_conv_preset'):
+            self.combo_conv_preset.blockSignals(True)
+            self.combo_conv_preset.setCurrentText(text)
+            self.combo_conv_preset.blockSignals(False)
+        self._on_conv_preset_changed(text)
+
+    def _on_left_watermark_method_changed(self, text):
+        if hasattr(self, 'combo_conv_method'):
+            self.combo_conv_method.blockSignals(True)
+            self.combo_conv_method.setCurrentText(text)
+            self.combo_conv_method.blockSignals(False)
+        self._update_runner_settings()
+
+    def _on_manual_watermark_change(self):
+        # Change preset combo box to Custom if user adjusts coordinates manually
+        if not self.spin_blur_x.signalsBlocked():
+            if hasattr(self, 'combo_conv_preset'):
+                self.combo_conv_preset.blockSignals(True)
+                self.combo_conv_preset.setCurrentText("Custom (Manual)")
+                self.combo_conv_preset.blockSignals(False)
+            if hasattr(self, 'combo_watermark_preset'):
+                self.combo_watermark_preset.blockSignals(True)
+                self.combo_watermark_preset.setCurrentText("Custom (Manual)")
+                self.combo_watermark_preset.blockSignals(False)
+            self._update_runner_settings()
+
     def _open_premium_whatsapp(self):
         msg = urllib.parse.quote("Hi! I'm interested in purchasing the premium license for GrowSnap AI.")
         webbrowser.open(f"https://wa.me/923138694809?text={msg}")
 
     def _manual_update_check(self):
         self._log("Checking for updates online...")
-        from grow_snap_dola.main import APP_VERSION
+        try:
+            from grow_snap_dola.main import APP_VERSION
+        except ImportError:
+            try:
+                # Add project parent directory to path and import
+                import sys
+                from pathlib import Path
+                proj_root = str(Path(__file__).resolve().parent.parent.parent)
+                if proj_root not in sys.path:
+                    sys.path.append(proj_root)
+                from grow_snap_dola.main import APP_VERSION
+            except ImportError:
+                APP_VERSION = "1.0.0"
         from dola_automation.updater import check_for_updates
         
         has_update, update_data, error_msg = check_for_updates(APP_VERSION)
@@ -2843,6 +3577,28 @@ class MainWindow(QMainWindow):
         else:
             self.combo_select_hook.setCurrentIndex(0)
         self.combo_select_hook.blockSignals(False)
+
+    def _open_folder_of_path(self, path):
+        path = path.strip()
+        if path and path != "No input selected" and path != "No output selected":
+            try:
+                import platform
+                import subprocess
+                import os
+                p = os.path.abspath(path)
+                if not os.path.exists(p):
+                    return
+                if os.path.isfile(p):
+                    p = os.path.dirname(p)
+                system = platform.system()
+                if system == 'Windows':
+                    subprocess.run(['explorer', p])
+                elif system == 'Darwin':
+                    subprocess.run(['open', p])
+                else:
+                    subprocess.run(['xdg-open', p])
+            except Exception as e:
+                QMessageBox.warning(self, "Folder Error", f"Could not open folder: {e}")
 
     def closeEvent(self, event):
         self._save_json_backup()

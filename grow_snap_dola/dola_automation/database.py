@@ -188,6 +188,39 @@ class HistoryDatabase:
         finally:
             conn.close()
 
+    def get_jobs_by_chat_url(self, chat_url: str) -> List[PromptJob]:
+        if not chat_url:
+            return []
+        conn = self._connect()
+        try:
+            rows = conn.execute("""
+                SELECT id, session_id, job_index, prompt, reference_image, status, download_path, chat_url, error, video_title, scene_index, caption, started_at
+                FROM jobs WHERE chat_url = ? ORDER BY job_index ASC
+            """, (chat_url,)).fetchall()
+            
+            jobs = []
+            for row in rows:
+                ref_img = Path(row['reference_image']) if row['reference_image'] else None
+                job = PromptJob(
+                    index=row['job_index'],
+                    prompt=row['prompt'],
+                    reference_image=ref_img,
+                    status=JobStatus(row['status']),
+                    download_path=row['download_path'],
+                    chat_url=row['chat_url'],
+                    error=row['error'],
+                    session_id=row['session_id'],
+                    job_id=row['id'],
+                    video_title=row['video_title'],
+                    scene_index=row['scene_index'],
+                    caption=row['caption'],
+                    started_at=row['started_at']
+                )
+                jobs.append(job)
+            return jobs
+        finally:
+            conn.close()
+
     def list_sessions(self, limit: int = 50) -> List[sqlite3.Row]:
         conn = self._connect()
         try:

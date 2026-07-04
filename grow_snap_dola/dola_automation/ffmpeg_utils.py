@@ -109,23 +109,50 @@ def process_video_watermark(input_path: Path, method: str, output_path: Path,
     w = max(1, min(width - x - 2, int(orig_w * scale_x)))
     h = max(1, min(height - y - 2, int(orig_h * scale_y)))
     
-    if method_lower == 'blur':
-        vf_filter = f"delogo=x={x}:y={y}:w={w}:h={h}"
-    elif method_lower == 'crop':
-        crop_h = max(1, min(height - 1, int(crop_pixels * scale_y)))
-        vf_filter = f"crop=iw:ih-{crop_h}:0:0"
-    else:
-        # No processing
-        vf_filter = None
-        
+    # Force even numbers for crop/overlay filter compatibility
+    x = (x // 2) * 2
+    y = (y // 2) * 2
+    w = (w // 2) * 2
+    h = (h // 2) * 2
+    
+    # Clip coordinates to boundaries
+    x = max(0, min(width - 4, x))
+    y = max(0, min(height - 4, y))
+    w = max(4, min(width - x, w))
+    h = max(4, min(height - y, h))
+
     temp_output = output_path.parent / f"temp_{output_path.name}"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
-    if vf_filter:
+    if method_lower == 'blur':
+        # Regional boxblur with feathered edge alpha masking to prevent sharp rectangular patches
+        # We create a black mask of video size, draw a white rect over watermark, blur the mask to feather edges,
+        # blur the entire video, and merge original + blurred based on the feathered mask.
+        filter_str = (
+            f"color=black:s={width}x{height}[mask];"
+            f"[mask]drawbox=x={x}:y={y}:w={w}:h={h}:color=white:t=fill[mask_rect];"
+            f"[mask_rect]boxblur=20:20[mask_feathered];"
+            f"[0:v]boxblur=25:5[blurred];"
+            f"[0:v][blurred][mask_feathered]maskedmerge"
+        )
         cmd = [
             str(ffmpeg_exe), '-y',
             '-i', str(input_path),
-            '-vf', vf_filter,
+            '-filter_complex', filter_str,
+            '-shortest',
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '17',
+            '-c:a', 'copy',
+            str(temp_output)
+        ]
+    elif method_lower == 'crop':
+        crop_h = max(1, min(height - 1, int(crop_pixels * scale_y)))
+        filter_str = f"crop=iw:ih-{crop_h}:0:0"
+        cmd = [
+            str(ffmpeg_exe), '-y',
+            '-i', str(input_path),
+            '-vf', filter_str,
             '-c:v', 'libx264',
             '-preset', 'fast',
             '-crf', '17',
@@ -150,9 +177,8 @@ def process_video_watermark(input_path: Path, method: str, output_path: Path,
     try:
         process = subprocess.run(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             creationflags=creationflags,
             check=True
         )
@@ -203,9 +229,8 @@ def concatenate_videos(input_paths: List[str], output_path: str) -> bool:
             
         res = subprocess.run(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             creationflags=creationflags
         )
         
@@ -249,35 +274,27 @@ class ConverterWorker(QThread):
         self.log.emit(f"Starting conversion of {total} videos using method: {self.method}")
         completed = 0
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_threads) as executor:
-            future_to_path = {}
-            for in_path in self.input_paths:
-                if self._stop:
-                    break
-                out_path = self.output_dir / in_path.name
-                future = executor.submit(
-                    process_video_watermark,
+        for in_path in self.input_paths:
+            if self._stop:
+                break
+            out_path = self.output_dir / in_path.name
+            try:
+                success = process_video_watermark(
                     in_path,
                     self.method,
                     out_path,
                     self.blur_coords,
                     self.crop_pixels
                 )
-                future_to_path[future] = in_path
+                if success:
+                    self.log.emit(f"Success: {in_path.name}")
+                else:
+                    self.log.emit(f"Failed: {in_path.name}")
+            except Exception as e:
+                self.log.emit(f"Error processing {in_path.name}: {e}")
                 
-            for future in concurrent.futures.as_completed(future_to_path):
-                in_path = future_to_path[future]
-                try:
-                    success = future.result()
-                    if success:
-                        self.log.emit(f"Success: {in_path.name}")
-                    else:
-                        self.log.emit(f"Failed: {in_path.name}")
-                except Exception as e:
-                    self.log.emit(f"Error processing {in_path.name}: {e}")
-                    
-                completed += 1
-                self.progress.emit(int((completed / total) * 100))
+            completed += 1
+            self.progress.emit(int((completed / total) * 100))
                 
         if self._stop:
             self.log.emit("Conversion stopped by user.")

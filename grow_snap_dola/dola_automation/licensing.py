@@ -120,9 +120,50 @@ def verify_key(email: str, key: str) -> Tuple[bool, str, dict]:
     except Exception as e:
         return False, f"Key verification error: {str(e)}", {}
 
+def check_blacklist(key_or_hw: str) -> bool:
+    """
+    Checks if a key or hardware ID is listed on the remote blacklist.
+    """
+    import urllib.request
+    import json
+    url = "https://links.growsnap.ai/blacklist.json"
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            blacklist = data.get("blacklist", [])
+            target = key_or_hw.strip().upper()
+            for item in blacklist:
+                if item.strip().upper() == target:
+                    return True
+    except Exception:
+        pass
+    return False
+
+def trigger_local_purge():
+    """
+    Recursively deletes local video outputs and application settings to revoke access.
+    """
+    import shutil
+    # 1. Clean up downloaded video outputs
+    try:
+        download_dir = Path.home() / 'Documents' / 'dola_downloads'
+        if download_dir.exists() and download_dir.is_dir():
+            shutil.rmtree(download_dir, ignore_errors=True)
+    except Exception:
+        pass
+
+    # 2. Clean up settings, profiles, and databases folder
+    try:
+        config_dir = Path.home() / 'Documents' / 'dola_video_automation'
+        if config_dir.exists() and config_dir.is_dir():
+            shutil.rmtree(config_dir, ignore_errors=True)
+    except Exception:
+        pass
+
 def check_license_stored() -> Tuple[bool, dict]:
     """
-    Checks if a valid license is saved locally.
+    Checks if a valid license is saved locally and verifies it against the remote blacklist.
     Returns (is_valid, license_data)
     """
     lic_file = get_license_file_path()
@@ -133,7 +174,26 @@ def check_license_stored() -> Tuple[bool, dict]:
             data = json.load(f)
         email = data.get('email', '')
         key = data.get('key', '')
+        hw = data.get('hardware', get_hardware_id())
         
+        # Check remote blacklist
+        if check_blacklist(hw) or check_blacklist(key):
+            trigger_local_purge()
+            
+            # Show critical alert dialog
+            from PyQt6.QtWidgets import QMessageBox, QApplication
+            app = QApplication.instance()
+            if not app:
+                import sys
+                app = QApplication(sys.argv)
+            QMessageBox.critical(
+                None,
+                "License Revoked",
+                "Your licensing key for GrowSnap Creative Suite has been revoked/cancelled.\n\n"
+                "Local files and settings have been cleaned up automatically."
+            )
+            return False, {}
+            
         is_valid, msg, details = verify_key(email, key)
         if is_valid:
             data.update(details)

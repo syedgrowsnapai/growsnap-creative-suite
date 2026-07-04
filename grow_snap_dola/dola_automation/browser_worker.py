@@ -36,11 +36,15 @@ class VPNRotator:
     
     # Supported countries by both Dola and NordVPN
     countries = [
-        "Singapore", "Japan", "South Korea", "United Kingdom", "Mexico", 
-        "Brazil", "Argentina", "Colombia", "Chile", "Serbia", "South Africa", 
-        "United Arab Emirates"
+        "Singapore", "Japan", "United Kingdom", "Germany", "France", 
+        "Italy", "Australia", "Spain", "Netherlands", 
+        "Sweden", "Switzerland", "New Zealand"
     ]
     
+    @classmethod
+    def get_last_rotate_time(cls) -> float:
+        return cls._last_rotate_time
+
     @classmethod
     def rotate_vpn(cls, log_fn=None) -> bool:
         with cls._lock:
@@ -66,6 +70,9 @@ class VPNRotator:
                         cmd = [nord_path, "-c", "-g", target_country]
                     else:
                         cmd = ["nordvpn", "-c", "-g", target_country]
+                elif os.path.exists("/mnt/c/Program Files/NordVPN/nordvpn.exe"): # WSL (Windows Subsystem for Linux)
+                    nord_path = "/mnt/c/Program Files/NordVPN/nordvpn.exe"
+                    cmd = [nord_path, "-c", "-g", target_country]
                 else: # Linux
                     cmd = ["nordvpn", "connect", target_country]
                     
@@ -77,6 +84,17 @@ class VPNRotator:
                 # Wait 10 seconds for IP allocation and connection to establish
                 time.sleep(10)
                 return True
+            except FileNotFoundError as fnf_err:
+                missing_exe = cmd[0] if 'cmd' in locals() else 'nordvpn'
+                err_instructions = (
+                    f"NordVPN executable '{missing_exe}' was not found. "
+                    "Please verify that the NordVPN application is installed and added to your system PATH. "
+                    "If you are using WSL, ensure the Windows desktop app is installed on your Windows host at "
+                    "C:\\Program Files\\NordVPN\\nordvpn.exe."
+                )
+                if log_fn:
+                    log_fn(f"NordVPN connection command failed: {fnf_err}\n[HELP] {err_instructions}")
+                return False
             except Exception as e:
                 if log_fn:
                     log_fn(f"NordVPN connection command failed: {e}")
@@ -92,6 +110,7 @@ class DolaBrowserWorker:
         self.download_dir.mkdir(parents=True, exist_ok=True)
         self._cancelled = False
         self._intercepted_mp4_urls: Set[str] = set()
+        self.video_index = 0
 
     def log_info(self, msg: str) -> None:
         logger.info(msg)
@@ -101,17 +120,23 @@ class DolaBrowserWorker:
     def cancel(self) -> None:
         self._cancelled = True
         self.log_info("Worker Cancelled.")
+        try:
+            if hasattr(self, '_browser') and self._browser:
+                self._browser.close()
+        except Exception:
+            pass
 
     def _get_job_session_path(self, job_index: int) -> Path:
         sessions_dir = Path.home() / 'Documents' / 'dola_video_automation' / 'sessions'
         sessions_dir.mkdir(parents=True, exist_ok=True)
         return sessions_dir / f"session_job_{job_index}.json"
 
-    def run_job(self, job: PromptJob, mode: str = "full") -> bool:
+    def run_job(self, job: PromptJob, mode: str = "full", video_index: int = 0) -> bool:
         """
         Executes the automation job. Mode can be 'full' (submit + wait + download) or 'download_only'.
         """
         self._intercepted_mp4_urls.clear()
+        self.video_index = video_index
         
         mode_label = "headed" if not self.settings.headless else "headless"
         self.log_info(f"Job #{job.index}: Starting Playwright execution in {mode_label} mode.")
@@ -132,6 +157,7 @@ class DolaBrowserWorker:
                 headless=self.settings.headless,
                 args=launch_args
             )
+            self._browser = browser
             
             # Setup context storage state
             context_kwargs = {
@@ -149,8 +175,12 @@ class DolaBrowserWorker:
                 else:
                     self.log_info("Warning: No session state file found for download mode.")
             else:
-                # Submission mode starts with a completely clean context to enforce a new chat session
-                self.log_info(f"Job #{job.index}: Clean browser session initialized (no shared cookies).")
+                # Submission mode
+                if self.settings.auth_state_path.exists():
+                    context_kwargs["storage_state"] = str(self.settings.auth_state_path)
+                    self.log_info("Loading global session state to preserve Dola login session.")
+                else:
+                    self.log_info(f"Job #{job.index}: Clean browser session initialized (no shared cookies).")
                 
             context = browser.new_context(**context_kwargs)
             context.set_default_timeout(30000)
@@ -190,8 +220,14 @@ class DolaBrowserWorker:
                 except Exception:
                     pass
             finally:
-                context.close()
-                browser.close()
+                try:
+                    context.close()
+                except Exception:
+                    pass
+                try:
+                    browser.close()
+                except Exception:
+                    pass
                 
         return success
 
@@ -211,30 +247,41 @@ class DolaBrowserWorker:
         page.add_locator_handler(page.locator(".semi-modal, .login-modal"), handle_popup)
 
     def _execute_on_page(self, page: Page, context: BrowserContext, job: PromptJob) -> bool:
-        # 1. Navigate to creation panel
-        create_url = "https://www.dola.com/chat/create-image"
-        self.log_info(f"Navigating to {create_url}...")
-        page.goto(create_url, wait_until="domcontentloaded")
-        page.wait_for_timeout(2000)
-        
-        # 2. Select Video tab
-        self._select_video_tab(page)
-        
-        # 3. Configure generation variables
-        self._configure_options(page)
-        
-        # 4. Upload reference image if mapped
-        if job.has_reference:
-            self.log_info(f"Uploading reference image: {job.reference_image.name}...")
-            self._upload_reference(page, job.reference_image)
-        else:
-            self.log_info("Pasting prompt as text-only (no reference image).")
-            
-        # 5. Type and submit prompt
-        self._fill_prompt(page, job.prompt)
-        
-        # 6. Click submit button
-        self._submit(page)
+        max_setup_attempts = 3
+        for attempt in range(max_setup_attempts):
+            try:
+                # 1. Navigate to creation panel
+                create_url = "https://www.dola.com/chat/create-image"
+                self.log_info(f"Navigating to {create_url} (Attempt {attempt+1}/{max_setup_attempts})...")
+                page.goto(create_url, wait_until="domcontentloaded")
+                page.wait_for_timeout(2000)
+                
+                # 2. Select Video tab
+                self._select_video_tab(page)
+                
+                # 3. Configure generation variables
+                self._configure_options(page)
+                
+                # 4. Upload reference image if mapped
+                if job.has_reference:
+                    self.log_info(f"Uploading reference image: {job.reference_image.name}...")
+                    self._upload_reference(page, job.reference_image)
+                else:
+                    self.log_info("Pasting prompt as text-only (no reference image).")
+                    
+                # 5. Type and submit prompt
+                self._fill_prompt(page, job.prompt)
+                
+                # 6. Click submit button
+                self._submit(page)
+                break
+            except Exception as e:
+                if time.time() - VPNRotator.get_last_rotate_time() < 40.0 and attempt < max_setup_attempts - 1:
+                    self.log_info("Network interruption detected during active system VPN rotation. Re-navigating and retrying prompt setup in 15 seconds...")
+                    time.sleep(15)
+                    continue
+                else:
+                    raise e
         
         # 7. Immediately save session details and wait for chat redirect
         self.log_info("Waiting for chat session to be created...")
@@ -356,37 +403,27 @@ class DolaBrowserWorker:
             return False
             
         self.log_info(f"Opening chat session: {job.chat_url}...")
-        page.goto(job.chat_url, wait_until="domcontentloaded")
-        page.wait_for_timeout(3000)
         
-        # Dismiss initial modals if present
-        self._close_dola_popups(page)
-        
-        # Check if we were redirected back to the home/create page
-        curr_url = page.url
-        if "/chat/" not in curr_url or curr_url.endswith("create-image") or curr_url.endswith("create-video") or curr_url.endswith("/chat") or curr_url.endswith("/chat/"):
-            self.log_info("Redirected to home screen. Attempting to recover latest active chat session...")
-            latest_chat = page.evaluate("""() => {
-                const links = Array.from(document.querySelectorAll('a'));
-                for (let a of links) {
-                    const href = a.getAttribute('href') || '';
-                    if (href.includes('/chat/') && 
-                        !href.includes('create-image') && 
-                        !href.includes('create-video') && 
-                        !href.endsWith('/chat') &&
-                        !href.endsWith('/chat/')) {
-                        return a.href;
-                    }
-                }
-                return null;
-            }""")
-            if latest_chat:
-                self.log_info(f"Latest chat session identified: {latest_chat}. Navigating...")
-                page.goto(latest_chat, wait_until="domcontentloaded")
-                page.wait_for_timeout(6000)
+        # Navigate strictly to target chat URL with a retry loop in case Dola redirects on load
+        max_nav_attempts = 3
+        for nav_attempt in range(max_nav_attempts):
+            try:
+                page.goto(job.chat_url, wait_until="domcontentloaded")
+                page.wait_for_timeout(4000)
                 self._close_dola_popups(page)
-            else:
-                self.log_info("Could not find any active chat session link in the page history.")
+                
+                curr_url = page.url
+                if curr_url == job.chat_url or f"/{job.chat_url.split('/')[-1]}" in curr_url:
+                    break
+                else:
+                    self.log_info(f"Warning: Navigated to {job.chat_url} but redirected to {curr_url}. Retrying navigation ({nav_attempt+1}/{max_nav_attempts})...")
+                    page.wait_for_timeout(2000)
+            except Exception as e:
+                if nav_attempt < max_nav_attempts - 1:
+                    page.wait_for_timeout(3000)
+                    continue
+                else:
+                    raise e
         
         # Inject floating progress UI helper
         self._inject_custom_ui(page, job.index)
@@ -397,15 +434,16 @@ class DolaBrowserWorker:
         self.log_info("Selecting Video generation tab...")
         try:
             video_btn = page.get_by_role("button", name="Video", exact=True)
-            video_btn.wait_for(state="visible", timeout=10000)
+            video_btn.wait_for(state="visible", timeout=20000)
             video_btn.click()
-            page.wait_for_timeout(1000)
+            page.wait_for_timeout(2000)
             self.log_info("SUCCESS! Video tab clicked.")
         except Exception as e:
             self.log_info(f"Warning: Could not click Video tab: {e}. Attempting manual click via coordinates.")
             # Fallback coordinate click
             try:
-                page.click("text=Video", timeout=5000)
+                page.click("text=Video", timeout=10000)
+                page.wait_for_timeout(2000)
             except Exception:
                 raise DolaAutomationError("Could not select Video generation tab. Login modal might be blocking the view.")
 
@@ -414,10 +452,12 @@ class DolaBrowserWorker:
         # 1. Aspect Ratio
         ratio_mapped = self.settings.ratio
         self._pick_dropdown(page, "Ratio", ratio_mapped)
+        page.wait_for_timeout(1500)
         
         # 2. Duration
         duration_mapped = self.settings.duration
         self._pick_dropdown(page, "Duration", duration_mapped)
+        page.wait_for_timeout(1500)
         
         # 3. Model
         model_mapped = self.settings.model
@@ -656,7 +696,7 @@ class DolaBrowserWorker:
             raise DolaAutomationError(f"Dola generation rejected: '{err}'")
         
         # Wait until video is ready using the polling loop
-        is_ready = self._wait_until_ready(page)
+        is_ready = self._wait_until_ready(page, job)
         
         if is_ready:
             job.status = JobStatus.DOWNLOADING
@@ -708,7 +748,7 @@ class DolaBrowserWorker:
                 job.error = f"Failed: Video not generated after 30+ minutes (elapsed {elapsed_mins:.1f}m). Please check manually: {job.chat_url}"
                 raise DolaAutomationError(f"Failed: Video not generated after 30+ minutes (elapsed {elapsed_mins:.1f}m). Please check manually: {job.chat_url}")
 
-    def _wait_until_ready(self, page: Page) -> bool:
+    def _wait_until_ready(self, page: Page, job: PromptJob) -> bool:
         start_time = time.time()
         timeout = self.settings.generation_timeout_sec if self.settings.generation_timeout_sec > 0 else 999999
         poll_interval = self.settings.poll_interval_sec
@@ -718,69 +758,69 @@ class DolaBrowserWorker:
             if self._cancelled:
                 return False
                 
-            # Check for region restriction
-            if "region-restricted" in page.url:
-                self.log_info("Region restriction detected during wait. Triggering VPN rotation...")
-                VPNRotator.rotate_vpn(self.log_info)
-                return False
-                
-            # Check if page has been redirected back to homepage/create page during wait
-            curr_url = page.url
-            if "/chat/" not in curr_url or curr_url.endswith("create-image") or curr_url.endswith("create-video") or curr_url.endswith("/chat") or curr_url.endswith("/chat/"):
-                self.log_info("Warning: Redirected to home screen during wait. Attempting to recover latest active chat...")
-                latest_chat = page.evaluate("""() => {
-                    const links = Array.from(document.querySelectorAll('a'));
-                    for (let a of links) {
-                        const href = a.getAttribute('href') || '';
-                        if (href.includes('/chat/') && 
-                            !href.includes('create-image') && 
-                            !href.includes('create-video') && 
-                            !href.endsWith('/chat') &&
-                            !href.endsWith('/chat/')) {
-                            return a.href;
-                        }
-                    }
-                    return null;
-                }""")
-                if latest_chat:
-                    self.log_info(f"Navigating back to latest active chat session: {latest_chat}")
-                    page.goto(latest_chat, wait_until="domcontentloaded")
-                    page.wait_for_timeout(6000)
-                    self._close_dola_popups(page)
-                    redirect_fail_count = 0  # reset on success
-                else:
-                    self.log_info("Could not find any active chat session link in the page history.")
-                    redirect_fail_count += 1
-                    if redirect_fail_count >= 3:
-                        raise DolaAutomationError("Chat session is expired or inaccessible on Dola (redirected to homepage).")
+            try:
+                # Check for region restriction
+                if "region-restricted" in page.url:
+                    self.log_info("Region restriction detected during wait. Triggering VPN rotation...")
+                    VPNRotator.rotate_vpn(self.log_info)
+                    return False
                     
-            # Check for standard generated video containers or tag
-            is_ready = page.evaluate("""() => {
-                // Look for video element with valid source
-                const v = document.querySelector('video');
-                if (v && (v.currentSrc || v.src)) return true;
+                # Check if page has been redirected back to homepage/create page during wait
+                curr_url = page.url
+                if "/chat/" not in curr_url or curr_url.endswith("create-image") or curr_url.endswith("create-video") or curr_url.endswith("/chat") or curr_url.endswith("/chat/"):
+                    self.log_info(f"Warning: Redirected to {curr_url} during wait. Navigating back to target job chat: {job.chat_url}")
+                    page.goto(job.chat_url, wait_until="domcontentloaded")
+                    page.wait_for_timeout(4000)
+                    self._close_dola_popups(page)
+                    redirect_fail_count += 1
+                    if redirect_fail_count >= 5:
+                        raise DolaAutomationError("Chat session is expired or inaccessible on Dola (repeated redirects).")
+                        
+                # Check for standard generated video containers or tag
+                is_ready = page.evaluate("""(targetIndex) => {
+                    // Find all video elements with valid source
+                    const videos = Array.from(document.querySelectorAll('video')).filter(v => v.currentSrc || v.src);
+                    if (videos.length > targetIndex) return true;
+                    
+                    // Alternatively, parse text blocks for ready messages
+                    const bodyText = document.body.innerText || "";
+                    // Count occurrences of ready markers
+                    const matches1 = (bodyText.match(/Your video is ready/gi) || []).length;
+                    const matches2 = (bodyText.match(/Video ready/gi) || []).length;
+                    const totalReady = Math.max(matches1, matches2, videos.length);
+                    
+                    if (totalReady > targetIndex) return true;
+                    return false;
+                }""", self.video_index)
                 
-                // Look for 'ready' texts
-                const bodyText = document.body.innerText || "";
-                if (bodyText.includes("Your video is ready") || bodyText.includes("Video ready")) return true;
-                
-                return false;
-            }""")
-            
-            if is_ready:
-                return True
-                
-            # Check for error text indications
-            has_error = page.evaluate("""() => {
-                const bodyText = document.body.innerText || "";
-                if (bodyText.includes("Generation failed") || bodyText.includes("Error generating video")) return true;
-                return false;
-            }""")
-            if has_error:
-                self.log_info("Warning - webpage displayed a generation error status.")
-                return False
-                
-            page.wait_for_timeout(int(poll_interval * 1000))
+                if is_ready:
+                    return True
+                    
+                # Check for error text indications
+                has_error = page.evaluate("""() => {
+                    const bodyText = document.body.innerText || "";
+                    if (bodyText.includes("Generation failed") || bodyText.includes("Error generating video")) return true;
+                    return false;
+                }""")
+                if has_error:
+                    self.log_info("Warning - webpage displayed a generation error status.")
+                    return False
+                    
+                page.wait_for_timeout(int(poll_interval * 1000))
+            except Exception as e:
+                # If a VPN rotation happened recently, wait and reload page instead of failing!
+                if time.time() - VPNRotator.get_last_rotate_time() < 40.0:
+                    self.log_info("Network drop detected during system-wide VPN rotation. Waiting 15s for stability and reloading page...")
+                    time.sleep(15)
+                    try:
+                        page.reload(wait_until="domcontentloaded")
+                        page.wait_for_timeout(3000)
+                        self._close_dola_popups(page)
+                    except Exception:
+                        pass
+                    continue
+                else:
+                    raise e
             
         self.log_info("Timed out waiting for video generation.")
         return False
@@ -790,35 +830,48 @@ class DolaBrowserWorker:
         timeout = 25.0  # Allow up to 25 seconds for the video URL/element to load
         
         while time.time() - start_time < timeout:
-            # 1. Try to fetch from intercepted network traffic
-            for url in self._intercepted_mp4_urls:
-                if "video" in url or ".mp4" in url:
-                    return url
-                    
-            # 2. Try to query the DOM directly
-            src = page.evaluate("""() => {
-                const v = document.querySelector('video');
-                if (v && (v.currentSrc || v.src)) return v.currentSrc || v.src;
+            # 1. Try to query the DOM directly at the target video index
+            src = page.evaluate("""(targetIndex) => {
+                const videos = Array.from(document.querySelectorAll('video'));
+                if (videos.length > 0) {
+                    const targetIdx = Math.min(targetIndex, videos.length - 1);
+                    const v = videos[targetIdx];
+                    if (v && (v.currentSrc || v.src)) return v.currentSrc || v.src;
+                }
                 
-                // Look for link elements
-                const links = Array.from(document.querySelectorAll('a'));
-                for (let a of links) {
-                    if (a.href && (a.href.includes('.mp4') || a.href.includes('video_mp4'))) return a.href;
+                // Look for link elements containing video files
+                const links = Array.from(document.querySelectorAll('a')).filter(a => a.href && (a.href.includes('.mp4') || a.href.includes('video_mp4')));
+                if (links.length > 0) {
+                    const targetIdx = Math.min(targetIndex, links.length - 1);
+                    return links[targetIdx].href;
                 }
                 return null;
-            }""")
+            }""", self.video_index)
+            
             if src:
                 return src
                 
+            # 2. Fallback to intercepted network traffic only if there is only 1 target video or DOM extraction failed
+            if self.video_index == 0:
+                for url in self._intercepted_mp4_urls:
+                    if "video" in url or ".mp4" in url:
+                        return url
+                        
             # 3. Trigger click on video element to force source load
             try:
-                page.evaluate("""() => {
-                    // Click video player block to activate elements
-                    const block = document.querySelector('[data-plugin-identifier="block_type:2074"]');
-                    if (block) block.click();
-                    const playBtn = document.querySelector('[class*="play-icon-wrapper"]');
-                    if (playBtn) playBtn.click();
-                }""")
+                page.evaluate("""(targetIndex) => {
+                    // Click the specific video player block to activate elements
+                    const blocks = Array.from(document.querySelectorAll('[data-plugin-identifier="block_type:2074"]'));
+                    if (blocks.length > 0) {
+                        const targetIdx = Math.min(targetIndex, blocks.length - 1);
+                        blocks[targetIdx].click();
+                    }
+                    const playBtns = Array.from(document.querySelectorAll('[class*="play-icon-wrapper"]'));
+                    if (playBtns.length > 0) {
+                        const targetIdx = Math.min(targetIndex, playBtns.length - 1);
+                        playBtns[targetIdx].click();
+                    }
+                }""", self.video_index)
             except Exception:
                 pass
                 

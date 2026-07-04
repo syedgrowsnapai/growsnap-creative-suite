@@ -2,16 +2,29 @@ import sys
 import os
 from pathlib import Path
 
+# Dynamic platform selector on Linux to prevent Wayland protocol resizing crashes
+if sys.platform == "linux":
+    import ctypes.util
+    has_xcb_cursor = ctypes.util.find_library("xcb-cursor") is not None
+    if has_xcb_cursor:
+        if "QT_QPA_PLATFORM" not in os.environ:
+            os.environ["QT_QPA_PLATFORM"] = "xcb"
+    else:
+        # If Wayland must be used due to missing X11 libxcb-cursor, disable decorations/DPI-bounds to prevent compositor crashes
+        if "QT_WAYLAND_DISABLE_WINDOWDECORATION" not in os.environ:
+            os.environ["QT_WAYLAND_DISABLE_WINDOWDECORATION"] = "1"
+
 # Add the current folder to sys.path to resolve dola_automation module correctly
 sys.path.insert(0, str(Path(__file__).parent.resolve()))
 
+from PyQt6.QtCore import QObject, QEvent
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtGui import QIcon
 from dola_automation.main_window import MainWindow
 from dola_automation.logger import logger, setup_logger
 from dola_automation.updater import check_for_updates, DEFAULT_UPDATE_URL
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 def get_resource_path(relative_path: str) -> Path:
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -79,6 +92,7 @@ def main():
         sys.argv.extend(["-class", "growsnapai", "-name", "growsnapai"])
         
     app = QApplication(sys.argv)
+    
     app.setApplicationName("growsnapai")
     app.setApplicationDisplayName("GrowSnap Creative Suite")
     

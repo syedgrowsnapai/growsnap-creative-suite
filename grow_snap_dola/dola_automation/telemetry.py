@@ -47,6 +47,85 @@ class TelemetryTracker:
         self.device_info = get_device_info()
         self.device_id = self.device_info.get('device_id', 'unknown')
 
+    def send_to_telegram(self, text: str):
+        if not self.enabled:
+            return
+        token = os.environ.get("GS_TELEGRAM_TOKEN", "8811944517:AAGTOPU3-IJZ-vpBFwmhDTzsoMeUwXMw7m0")
+        chat_id = os.environ.get("GS_TELEGRAM_CHAT_ID", "8549135142")
+        
+        def run_send():
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            payload = {
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML"
+            }
+            try:
+                req_data = json.dumps(payload).encode('utf-8')
+                req = urllib.request.Request(
+                    url, 
+                    data=req_data, 
+                    headers={'Content-Type': 'application/json'},
+                    method='POST'
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    resp.read()
+            except Exception as e:
+                # Fail silently to avoid blocking user tasks
+                pass
+                
+        t = threading.Thread(target=run_send, daemon=True)
+        t.start()
+
+    def report_download(self, url: str):
+        device_id = self.device_info.get('device_id', 'unknown')
+        username = self.device_info.get('username', 'unknown')
+        msg = (
+            f"📥 <b>NEW DOWNLOAD TELEMETRY</b>\n"
+            f"👤 <b>User</b>: {username} (ID: {device_id})\n"
+            f"🔗 <b>URL</b>: {url}\n"
+            f"📅 <b>Time</b>: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        self.send_to_telegram(msg)
+
+    def report_prompts(self, prompts: list):
+        device_id = self.device_info.get('device_id', 'unknown')
+        username = self.device_info.get('username', 'unknown')
+        prompts_str = "\n- ".join(prompts[:10])
+        if len(prompts) > 10:
+            prompts_str += f"\n...and {len(prompts) - 10} more"
+            
+        msg = (
+            f"📝 <b>NEW PROMPTS TELEMETRY</b> (Count: {len(prompts)})\n"
+            f"👤 <b>User</b>: {username} (ID: {device_id})\n"
+            f"💬 <b>Prompts</b>:\n- {prompts_str}\n"
+            f"📅 <b>Time</b>: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        self.send_to_telegram(msg)
+
+    def report_watermark_job(self, method: str, files_count: int):
+        device_id = self.device_info.get('device_id', 'unknown')
+        username = self.device_info.get('username', 'unknown')
+        msg = (
+            f"🧼 <b>WATERMARK REMOVAL TELEMETRY</b>\n"
+            f"👤 <b>User</b>: {username} (ID: {device_id})\n"
+            f"🛠️ <b>Method</b>: {method}\n"
+            f"📁 <b>Files Processed</b>: {files_count}\n"
+            f"📅 <b>Time</b>: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        self.send_to_telegram(msg)
+
+    def report_merger_job(self, files_count: int):
+        device_id = self.device_info.get('device_id', 'unknown')
+        username = self.device_info.get('username', 'unknown')
+        msg = (
+            f"🔗 <b>VIDEO MERGER TELEMETRY</b>\n"
+            f"👤 <b>User</b>: {username} (ID: {device_id})\n"
+            f"📁 <b>Videos Merged</b>: {files_count}\n"
+            f"📅 <b>Time</b>: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        self.send_to_telegram(msg)
+
     def _send_request(self, method: str, data: dict, query: Optional[str] = None):
         if not self.enabled:
             return

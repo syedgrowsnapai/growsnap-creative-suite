@@ -594,6 +594,66 @@ class MergerHelpDialog(QDialog):
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
 
+class HookFactoryHelpDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Viral Hook Factory — Instructions")
+        self.setFixedSize(540, 520)
+        self.setStyleSheet(APP_STYLE)
+        
+        icon_path = get_resource_path("resources/icon.png")
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+            
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        
+        title = QLabel("Viral Hook Factory Guide", self)
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #2ecc71;")
+        layout.addWidget(title)
+        
+        browser = QTextBrowser(self)
+        browser.setHtml("""
+        <h3>Overview</h3>
+        <p>The Viral Hook Factory helps you scrape high-performing viral video hooks from social platforms, crop/transcode them, and merge them with your videos to skyrocket viewer retention.</p>
+        
+        <h3>Workflow Steps:</h3>
+        <ol>
+            <li><b>Media Grabber:</b> 
+                <ul>
+                    <li>Download any single Reel/TikTok/YouTube video, or analyze an entire channel/account feed.</li>
+                    <li>The profile analyzer automatically calculates median view counts and marks videos that got > 1.5x median views as <b>🔥 OUTLIERS</b>.</li>
+                    <li>Double-click any outlier in the table to load its URL into the downloader.</li>
+                    <li>If a platform (like Instagram) restricts anonymous access, select your active browser from the <b>Cookies</b> dropdown to authenticate the request using your local browser session cookies.</li>
+                </ul>
+            </li>
+            <li><b>Hook Cropper:</b>
+                <ul>
+                    <li>Once downloaded, click <b>Analyze Clip</b> to automatically transcribe the first 10 seconds of speech (using local audio extraction + Speech Recognition) and run video scene-cut analysis.</li>
+                    <li>It suggests an optimal crop duration (based on the first scene transition or speech pause) and transcribes the speech to auto-generate a descriptive hook title.</li>
+                    <li>Specify the start and end times manually if you want to tweak it.</li>
+                    <li>Choose <b>Force Vertical (9:16)</b> if you want the cropper to scale/crop horizontal clips to vertical format.</li>
+                    <li>Click <b>Crop & Export</b> to transcode and save the hook to your library. You can optionally delete the original downloaded file upon confirmation.</li>
+                </ul>
+            </li>
+            <li><b>Hook Library & Merger:</b>
+                <ul>
+                    <li>Browse your saved hooks in a visual card grid showing thumbnail images and descriptive titles.</li>
+                    <li>Double-click or click <b>Play / Preview</b> to open and preview the hook.</li>
+                    <li>Use the <b>Hook Merger</b> to prepend a saved hook sequence directly to any background video on your PC.</li>
+                    <li>Hooks can also be configured to be automatically prepended to videos generated from the main <b>Dola Video Automation</b> tab!</li>
+                </ul>
+            </li>
+        </ol>
+        """)
+        layout.addWidget(browser)
+        
+        btn_close = QPushButton("Close", self)
+        btn_close.clicked.connect(self.accept)
+        layout.addWidget(btn_close)
+
 class DependencySetupWorker(QThread):
     progress = pyqtSignal(int)      # Progress percentage (0-100)
     status = pyqtSignal(str)        # Status description text

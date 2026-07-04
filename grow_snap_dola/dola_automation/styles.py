@@ -217,11 +217,8 @@ QComboBox::drop-down {
 
 QComboBox QAbstractItemView {
     background-color: #122218;
-    border: 1px solid rgba(46, 74, 56, 0.55);
-    border-radius: 8px;
     color: #F0FDF4;
     selection-background-color: rgba(46, 204, 113, 0.25);
-    padding: 4px;
 }
 
 /* ─── Checkboxes ────────────────────────────────────── */
@@ -459,6 +456,60 @@ QLabel#made_by {
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 1.5px;
+}
+
+/* ─── Sidebar Navigation Accordion ───────────────────── */
+QWidget#sidebar {
+    background-color: #07120c;
+    border-right: 1px solid rgba(46, 74, 56, 0.40);
+}
+
+QLabel#sidebar_title {
+    font-size: 18px;
+    font-weight: 800;
+    color: #2ecc71;
+    padding: 10px 0px;
+}
+
+QPushButton#category_header {
+    background-color: transparent;
+    border: none;
+    color: #F0FDF4;
+    font-weight: 800;
+    font-size: 14px;
+    text-align: left;
+    padding: 12px 10px;
+    min-height: 24px;
+}
+
+QPushButton#category_header:hover {
+    color: #2ecc71;
+}
+
+QPushButton#sub_nav_button {
+    background-color: transparent;
+    border: none;
+    border-left: 2px solid rgba(46, 74, 56, 0.2);
+    border-radius: 0px;
+    padding: 6px 12px;
+    margin-left: 10px;
+    text-align: left;
+    color: rgba(240, 253, 244, 0.65);
+    font-weight: 500;
+    font-size: 13px;
+    min-height: 18px;
+}
+
+QPushButton#sub_nav_button:hover {
+    color: #ffffff;
+    border-left-color: rgba(46, 204, 113, 0.4);
+}
+
+QPushButton#sub_nav_button:checked {
+    color: #2ecc71;
+    font-weight: 700;
+    border-left-color: #2ecc71;
+    background-color: rgba(46, 204, 113, 0.05);
 }
 """
 

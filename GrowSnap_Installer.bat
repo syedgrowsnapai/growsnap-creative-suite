@@ -75,7 +75,7 @@ python -m venv .venv
 echo [Installer] Installing package dependencies...
 call .venv\Scripts\activate.bat
 python -m pip install --upgrade pip
-pip install pyqt6 patchright requests yt-dlp
+pip install pyqt6 patchright requests yt-dlp gTTS
 
 echo.
 echo ===================================================
