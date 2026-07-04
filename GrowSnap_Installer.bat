@@ -10,29 +10,78 @@ set GITHUB_USER=syedgrowsnapai
 set GITHUB_REPO=growsnap-creative-suite
 set BRANCH=main
 :: ───────────────────────────────────
+cd /d "%~dp0"
 
 :: 1. Check for Python
 python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [Installer] Python is not installed.
-    echo Downloading Python 3.11.9 installer for Windows...
-    powershell -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile 'python_setup.exe'"
-    echo Launching Python installer.
-    echo.
-    echo IMPORTANT: You MUST check "Add python.exe to PATH" at the bottom of the installer window!
-    echo.
-    start /wait python_setup.exe
-    del python_setup.exe
-    
-    :: Check python again to verify
-    python --version >nul 2>&1
-    if %errorlevel% neq 0 (
-        echo [ERROR] Python installation not completed or not added to PATH.
-        echo Please install Python manually and check the PATH box, then run this installer again.
-        pause
-        exit /b
+if %errorlevel% equ 0 (
+    set PYTHON_CMD=python
+    goto python_found
+)
+
+py --version >nul 2>&1
+if %errorlevel% equ 0 (
+    set PYTHON_CMD=py
+    goto python_found
+)
+
+for %%V in (312 311 310 313) do (
+    if exist "%LocalAppData%\Programs\Python\Python%%V\python.exe" (
+        set PYTHON_CMD="%LocalAppData%\Programs\Python\Python%%V\python.exe"
+        goto python_found
     )
 )
+
+for %%V in (312 311 310 313) do (
+    if exist "C:\Program Files\Python%%V\python.exe" (
+        set PYTHON_CMD="C:\Program Files\Python%%V\python.exe"
+        goto python_found
+    )
+)
+
+echo [Installer] Python is not installed or not on PATH.
+echo Downloading Python 3.11.9 installer for Windows...
+powershell -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile 'python_setup.exe'"
+echo Launching Python installer.
+echo.
+echo IMPORTANT: You MUST check "Add python.exe to PATH" at the bottom of the installer window!
+echo.
+start /wait python_setup.exe
+del python_setup.exe
+
+:: Check python again after install
+python --version >nul 2>&1
+if %errorlevel% equ 0 (
+    set PYTHON_CMD=python
+    goto python_found
+)
+
+py --version >nul 2>&1
+if %errorlevel% equ 0 (
+    set PYTHON_CMD=py
+    goto python_found
+)
+
+for %%V in (312 311 310 313) do (
+    if exist "%LocalAppData%\Programs\Python\Python%%V\python.exe" (
+        set PYTHON_CMD="%LocalAppData%\Programs\Python\Python%%V\python.exe"
+        goto python_found
+    )
+)
+
+for %%V in (312 311 310 313) do (
+    if exist "C:\Program Files\Python%%V\python.exe" (
+        set PYTHON_CMD="C:\Program Files\Python%%V\python.exe"
+        goto python_found
+    )
+)
+
+echo [ERROR] Python installation not completed or not added to PATH.
+echo Please install Python manually and check the PATH box, then run this installer again.
+pause
+exit /b
+
+:python_found
 
 :: 2. Download code from GitHub
 echo [Installer] Downloading code package from GitHub (%GITHUB_USER%/%GITHUB_REPO%)...
@@ -70,7 +119,7 @@ cd "GrowSnap Creative Suite"
 
 :: 3. Setup Virtual Environment
 echo [Installer] Creating virtual environment...
-python -m venv .venv
+%PYTHON_CMD% -m venv .venv
 
 echo [Installer] Installing package dependencies...
 call .venv\Scripts\activate.bat
