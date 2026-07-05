@@ -9,7 +9,13 @@ echo.
 if exist .venv\Scripts\python.exe (
     if not exist "%userprofile%\Desktop\GrowSnap One.lnk" call :create_shortcut
     echo Starting GrowSnap One...
-    start "" ".venv\Scripts\python.exe" "grow_snap_dola/main.py" %*
+    ".venv\Scripts\python.exe" "grow_snap_dola\main.py" %*
+    if %errorlevel% neq 0 (
+        echo.
+        echo [ERROR] GrowSnap One exited with error code %errorlevel%
+        echo Please take a screenshot of this error and report it.
+        pause
+    )
     exit /b
 )
 
