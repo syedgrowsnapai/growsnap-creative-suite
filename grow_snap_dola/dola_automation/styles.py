@@ -511,6 +511,11 @@ QPushButton#sub_nav_button:checked {
     border-left-color: #2ecc71;
     background-color: rgba(46, 204, 113, 0.05);
 }
+
+/* ─── Global Dialogs & Pop-ups (Orbitron Font) ─────── */
+QDialog, QDialog QLabel, QDialog QPushButton, QDialog QLineEdit, QDialog QTextEdit, QDialog QComboBox {
+    font-family: "Orbitron", "Sora", sans-serif;
+}
 """
 
 STATUS_COLORS = {
@@ -537,7 +542,7 @@ class GradientLabel(QLabel):
         self.gradient_end = QColor("#D9CB04")
         
         f = self.font()
-        f.setFamily("Sora")
+        f.setFamily("Orbitron")
         f.setPointSize(font_size)
         f.setBold(bold)
         self.setFont(f)

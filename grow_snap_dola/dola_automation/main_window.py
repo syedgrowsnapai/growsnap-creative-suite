@@ -518,20 +518,46 @@ class MainWindow(QMainWindow):
         sidebar_layout.setContentsMargins(15, 20, 15, 20)
         sidebar_layout.setSpacing(10)
 
-        # Clickable header button containing Logo + Text
-        self.btn_home_logo = QPushButton(self)
-        self.btn_home_logo.setObjectName("category_header")
-        self.btn_home_logo.setStyleSheet("text-align: left; padding: 5px 0px; font-size: 18px; font-weight: 800; color: #2ecc71;")
+        # Clickable header container containing Logo + Text
+        self.home_header_widget = QWidget(self)
+        self.home_header_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.home_header_widget.mousePressEvent = lambda event: self._on_nav_changed(10)
+        self.home_header_widget.setStyleSheet("background: transparent; border: none;")
         
+        header_layout = QHBoxLayout(self.home_header_widget)
+        header_layout.setContentsMargins(10, 5, 10, 5)
+        header_layout.setSpacing(10)
+        
+        # Logo label
+        self.lbl_home_logo_icon = QLabel(self)
+        self.lbl_home_logo_icon.setStyleSheet("border: none; background: transparent;")
         icon_path = get_resource_path("resources/icon.png")
         if icon_path.exists():
-            self.btn_home_logo.setIcon(QIcon(str(icon_path)))
-            from PyQt6.QtCore import QSize
-            self.btn_home_logo.setIconSize(QSize(28, 28))
+            from PyQt6.QtGui import QPixmap
+            pixmap = QPixmap(str(icon_path))
+            self.lbl_home_logo_icon.setPixmap(pixmap.scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        header_layout.addWidget(self.lbl_home_logo_icon)
+        
+        # Title label
+        self.lbl_home_logo_text = QLabel("GrowSnap One", self)
+        self.lbl_home_logo_text.setStyleSheet("font-family: 'Orbitron'; font-size: 18px; font-weight: 900; color: #ffffff; border: none; background: transparent; padding: 0px; margin: 0px;")
+        
+        # Add glowing neon-green shadow effect to the text label
+        try:
+            from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+            from PyQt6.QtGui import QColor
+            glow = QGraphicsDropShadowEffect(self)
+            glow.setBlurRadius(20)
+            glow.setColor(QColor("#2ecc71"))
+            glow.setOffset(0, 0)
+            self.lbl_home_logo_text.setGraphicsEffect(glow)
+        except Exception:
+            pass
             
-        self.btn_home_logo.setText(" GrowSnap One")
-        self.btn_home_logo.clicked.connect(lambda: self._on_nav_changed(10))
-        sidebar_layout.addWidget(self.btn_home_logo)
+        header_layout.addWidget(self.lbl_home_logo_text)
+        header_layout.addStretch()
+        
+        sidebar_layout.addWidget(self.home_header_widget)
 
         # Accordion: CreativeSnap
         self.btn_cat_creative = QPushButton("CreativeSnap ▼", self)
