@@ -80,18 +80,6 @@ def main():
     setup_logger()
     logger.info("Launching GrowSnap One...")
     
-    # Load custom Orbitron fonts
-    try:
-        from PyQt6.QtGui import QFontDatabase
-        font_dir = get_resource_path("resources")
-        bold_path = font_dir / "Orbitron-Bold.ttf"
-        med_path = font_dir / "Orbitron-Medium.ttf"
-        if bold_path.exists():
-            QFontDatabase.addApplicationFont(str(bold_path))
-        if med_path.exists():
-            QFontDatabase.addApplicationFont(str(med_path))
-    except Exception as e:
-        logger.warning(f"Failed to load custom fonts: {e}")
     # Force Windows to display the custom window icon in the taskbar when running compiled/source
     try:
         import ctypes
@@ -105,6 +93,19 @@ def main():
         sys.argv.extend(["-class", "growsnapai", "-name", "growsnapai"])
         
     app = QApplication(sys.argv)
+    
+    # Load custom Orbitron fonts (must be initialized after QApplication)
+    try:
+        from PyQt6.QtGui import QFontDatabase
+        font_dir = get_resource_path("resources")
+        bold_path = font_dir / "Orbitron-Bold.ttf"
+        med_path = font_dir / "Orbitron-Medium.ttf"
+        if bold_path.exists():
+            QFontDatabase.addApplicationFont(str(bold_path))
+        if med_path.exists():
+            QFontDatabase.addApplicationFont(str(med_path))
+    except Exception as e:
+        logger.warning(f"Failed to load custom fonts: {e}")
     
     app.setApplicationName("growsnapai")
     app.setApplicationDisplayName("GrowSnap One")
