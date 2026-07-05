@@ -20,7 +20,7 @@ def get_resource_path(relative_path: str) -> Path:
 class InstructionsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Grow Snap 1 — Instructions")
+        self.setWindowTitle("GrowSnap One — Instructions")
         self.setFixedSize(550, 550)
         self.setStyleSheet(APP_STYLE)
         
@@ -39,7 +39,7 @@ class InstructionsDialog(QDialog):
         
         browser = QTextBrowser(self)
         browser.setHtml("""
-        <h3>How to run Grow Snap 1:</h3>
+        <h3>How to run GrowSnap One:</h3>
         <ol>
             <li><b>Prepare your CSV:</b> Your CSV should contain the columns: 
             <br/><code>Brand, Emotion, Video Title, Scene 1 (0-10s), Scene 2 (10-20s), Scene 3 (20-30s), Scene 4 (30-40s), CTA Keyword, Long Caption</code>.</li>
@@ -87,7 +87,7 @@ class InstructionsDialog(QDialog):
 class IssuesDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Grow Snap 1 — Troubleshooting")
+        self.setWindowTitle("GrowSnap One — Troubleshooting")
         self.setFixedSize(500, 350)
         self.setStyleSheet(APP_STYLE)
         
@@ -123,7 +123,7 @@ class IssuesDialog(QDialog):
 class SupportDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Grow Snap 1 — Developer Support")
+        self.setWindowTitle("GrowSnap One — Developer Support")
         self.setFixedSize(400, 200)
         self.setStyleSheet(APP_STYLE)
         
@@ -153,7 +153,7 @@ class SupportDialog(QDialog):
 class ActivationDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Grow Snap 1 — Software Activation")
+        self.setWindowTitle("GrowSnap One — Software Activation")
         self.setFixedSize(520, 470)
         self.setStyleSheet(APP_STYLE)
         
@@ -179,7 +179,7 @@ class ActivationDialog(QDialog):
         lbl_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl_logo)
         
-        lbl_title = GradientLabel("Grow Snap 1", self)
+        lbl_title = GradientLabel("GrowSnap One", self)
         lbl_title.setObjectName("title")
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(lbl_title)
@@ -248,7 +248,7 @@ class ActivationDialog(QDialog):
         import webbrowser
         import urllib.parse
         from dola_automation.licensing import get_hardware_id
-        msg = urllib.parse.quote(f"Hi! I'm interested in purchasing a license / free trial for Grow Snap 1.\nMy Hardware ID is: {get_hardware_id()}")
+        msg = urllib.parse.quote(f"Hi! I'm interested in purchasing a license / free trial for GrowSnap One.\nMy Hardware ID is: {get_hardware_id()}")
         webbrowser.open(f"https://wa.me/923138694809?text={msg}")
         
     def _activate(self):
@@ -267,7 +267,7 @@ class ActivationDialog(QDialog):
             hw = details.get('hardware', '')
             
             save_license(email, key, plan, expiry, hw)
-            QMessageBox.information(self, "Activated", f"Activation successful!\n\nPlan: {plan}\nExpires: {expiry}\n\nThank you for using Grow Snap 1!")
+            QMessageBox.information(self, "Activated", f"Activation successful!\n\nPlan: {plan}\nExpires: {expiry}\n\nThank you for using GrowSnap One!")
             self.accept()
         else:
             QMessageBox.critical(self, "Activation Failed", f"Activation failed:\n{msg}")
@@ -298,7 +298,7 @@ class ActivationDialog(QDialog):
 class ThreadsWarningDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Grow Snap 1 — High Concurrency Warning")
+        self.setWindowTitle("GrowSnap One — High Concurrency Warning")
         self.setFixedSize(550, 520)
         self.setStyleSheet(APP_STYLE)
         
@@ -387,7 +387,7 @@ class UpdateDialog(QDialog):
         self.is_mandatory = is_mandatory
         self.downloader = None
         
-        self.setWindowTitle("Grow Snap 1 — Update Available")
+        self.setWindowTitle("GrowSnap One — Update Available")
         self.setFixedSize(500, 390)
         self.setStyleSheet(APP_STYLE)
         
@@ -824,7 +824,7 @@ class DependencySetupWorker(QThread):
 class DependencyInstallerDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Grow Snap 1 — First Run Setup")
+        self.setWindowTitle("GrowSnap One — First Run Setup")
         self.setFixedSize(480, 240)
         self.setStyleSheet(APP_STYLE)
         

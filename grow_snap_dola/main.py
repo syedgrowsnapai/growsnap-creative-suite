@@ -62,7 +62,7 @@ def register_desktop_entry():
         
         desktop_content = f"""[Desktop Entry]
 Type=Application
-Name=Grow Snap 1
+Name=GrowSnap One
 Comment=AI Video Automation & Production Suite
 Exec={run_script}
 Icon={icon_png}
@@ -78,7 +78,7 @@ StartupWMClass=growsnapai
 
 def main():
     setup_logger()
-    logger.info("Launching Grow Snap 1...")
+    logger.info("Launching GrowSnap One...")
     # Force Windows to display the custom window icon in the taskbar when running compiled/source
     try:
         import ctypes
@@ -94,7 +94,7 @@ def main():
     app = QApplication(sys.argv)
     
     app.setApplicationName("growsnapai")
-    app.setApplicationDisplayName("Grow Snap 1")
+    app.setApplicationDisplayName("GrowSnap One")
     
     # Enable matching on Linux/Wayland
     try:
@@ -140,7 +140,7 @@ def main():
         sys.exit(0)
             
     # 3. Launch Main Window
-    logger.info("License and updates checked. Displaying Grow Snap 1.")
+    logger.info("License and updates checked. Displaying GrowSnap One.")
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

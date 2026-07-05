@@ -189,7 +189,7 @@ def check_license_stored() -> Tuple[bool, dict]:
             QMessageBox.critical(
                 None,
                 "License Revoked",
-                "Your licensing key for Grow Snap 1 has been revoked/cancelled.\n\n"
+                "Your licensing key for GrowSnap One has been revoked/cancelled.\n\n"
                 "Local files and settings have been cleaned up automatically."
             )
             return False, {}

@@ -425,9 +425,9 @@ class MainWindow(QMainWindow):
             email = lic_data.get('email', 'N/A')
             plan = lic_data.get('plan', 'N/A')
             days_left = lic_data.get('days_left', 0)
-            self.setWindowTitle(f"Grow Snap 1 — User: {email} | Plan: {plan} ({days_left} days left)")
+            self.setWindowTitle(f"GrowSnap One — User: {email} | Plan: {plan} ({days_left} days left)")
         else:
-            self.setWindowTitle("Grow Snap 1")
+            self.setWindowTitle("GrowSnap One")
             
         self.resize(1300, 850)
         
@@ -529,7 +529,7 @@ class MainWindow(QMainWindow):
             from PyQt6.QtCore import QSize
             self.btn_home_logo.setIconSize(QSize(28, 28))
             
-        self.btn_home_logo.setText(" Grow Snap 1")
+        self.btn_home_logo.setText(" GrowSnap One")
         self.btn_home_logo.clicked.connect(lambda: self._on_nav_changed(9))
         sidebar_layout.addWidget(self.btn_home_logo)
 
@@ -1449,7 +1449,7 @@ class MainWindow(QMainWindow):
             7: "SMS Gateway (httpSMS)",
             8: "WhatsApp Automation",
             9: "AI Voice Telephony",
-            10: "Grow Snap 1 Dashboard",
+            10: "GrowSnap One Dashboard",
             11: "CreativeSnap Dashboard",
             12: "ReachSnap Dashboard",
             13: "Voice Cloner & TTS Engine",
@@ -1457,7 +1457,7 @@ class MainWindow(QMainWindow):
             15: "Autonomous Script-to-Video Agent"
         }
         if hasattr(self, 'title_lbl'):
-            self.title_lbl.setText(titles.get(button_id, "Grow Snap 1"))
+            self.title_lbl.setText(titles.get(button_id, "GrowSnap One"))
             
         # Keep button states in sync
         if 10 <= button_id <= 12:
@@ -3469,7 +3469,7 @@ class MainWindow(QMainWindow):
             self._update_runner_settings()
 
     def _open_premium_whatsapp(self):
-        msg = urllib.parse.quote("Hi! I'm interested in purchasing the premium license for Grow Snap 1.")
+        msg = urllib.parse.quote("Hi! I'm interested in purchasing the premium license for GrowSnap One.")
         webbrowser.open(f"https://wa.me/923138694809?text={msg}")
 
     def _manual_update_check(self):
@@ -3504,7 +3504,7 @@ class MainWindow(QMainWindow):
             dialog.exec()
         else:
             self._log("You are running the latest version.")
-            QMessageBox.information(self, "Update Check", f"You are running the latest version: Grow Snap 1 v{APP_VERSION}")
+            QMessageBox.information(self, "Update Check", f"You are running the latest version: GrowSnap One v{APP_VERSION}")
 
     def _align_hook_to_video(self, hook_path: Path, ref_path: Path, temp_path: Path) -> bool:
         ffmpeg_exe = get_ffmpeg_path()

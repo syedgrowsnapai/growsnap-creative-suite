@@ -1,26 +1,26 @@
 @echo off
 cd /d "%~dp0"
 echo ===================================================
-echo   Grow Snap 1 — Launcher
+echo   GrowSnap One — Launcher
 echo ===================================================
 echo.
 
 :: 1. If virtual env already exists, run the application directly
 if exist .venv\Scripts\python.exe (
-    if not exist "%userprofile%\Desktop\Grow Snap 1.lnk" (
+    if not exist "%userprofile%\Desktop\GrowSnap One.lnk" (
         echo Creating Desktop Shortcut...
         echo Set oWS = CreateObject("WScript.Shell") > "%temp%\CreateShortcut.vbs"
-        echo sLinkFile = "%userprofile%\Desktop\Grow Snap 1.lnk" >> "%temp%\CreateShortcut.vbs"
+        echo sLinkFile = "%userprofile%\Desktop\GrowSnap One.lnk" >> "%temp%\CreateShortcut.vbs"
         echo Set oLink = oWS.CreateShortcut(sLinkFile) >> "%temp%\CreateShortcut.vbs"
         echo oLink.TargetPath = "%~dp0run_grow_snap.bat" >> "%temp%\CreateShortcut.vbs"
         echo oLink.WorkingDirectory = "%~dp0" >> "%temp%\CreateShortcut.vbs"
-        echo oLink.Description = "Launch Grow Snap 1" >> "%temp%\CreateShortcut.vbs"
+        echo oLink.Description = "Launch GrowSnap One" >> "%temp%\CreateShortcut.vbs"
         echo oLink.IconLocation = "%~dp0grow_snap_dola\dola_automation\resources\icon.ico" >> "%temp%\CreateShortcut.vbs"
         echo oLink.Save >> "%temp%\CreateShortcut.vbs"
         cscript /nologo "%temp%\CreateShortcut.vbs" >nul 2>&1
         del "%temp%\CreateShortcut.vbs" >nul 2>&1
     )
-    echo Starting Grow Snap 1...
+    echo Starting GrowSnap One...
     start "" ".venv\Scripts\python.exe" "grow_snap_dola/main.py" %*
     exit /b
 )
@@ -72,19 +72,19 @@ python -m pip install --upgrade pip
 pip install pyqt6 patchright requests yt-dlp gTTS
 
 :: Create Desktop Shortcut on first run
-if not exist "%userprofile%\Desktop\Grow Snap 1.lnk" (
+if not exist "%userprofile%\Desktop\GrowSnap One.lnk" (
     echo Creating Desktop Shortcut...
     echo Set oWS = CreateObject("WScript.Shell") > "%temp%\CreateShortcut.vbs"
-    echo sLinkFile = "%userprofile%\Desktop\Grow Snap 1.lnk" >> "%temp%\CreateShortcut.vbs"
+    echo sLinkFile = "%userprofile%\Desktop\GrowSnap One.lnk" >> "%temp%\CreateShortcut.vbs"
     echo Set oLink = oWS.CreateShortcut(sLinkFile) >> "%temp%\CreateShortcut.vbs"
     echo oLink.TargetPath = "%~dp0run_grow_snap.bat" >> "%temp%\CreateShortcut.vbs"
     echo oLink.WorkingDirectory = "%~dp0" >> "%temp%\CreateShortcut.vbs"
-    echo oLink.Description = "Launch Grow Snap 1" >> "%temp%\CreateShortcut.vbs"
+    echo oLink.Description = "Launch GrowSnap One" >> "%temp%\CreateShortcut.vbs"
     echo oLink.IconLocation = "%~dp0grow_snap_dola\dola_automation\resources\icon.ico" >> "%temp%\CreateShortcut.vbs"
     echo oLink.Save >> "%temp%\CreateShortcut.vbs"
     cscript /nologo "%temp%\CreateShortcut.vbs" >nul 2>&1
     del "%temp%\CreateShortcut.vbs" >nul 2>&1
 )
 
-echo Starting Grow Snap 1...
+echo Starting GrowSnap One...
 python grow_snap_dola/main.py %*
