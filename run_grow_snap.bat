@@ -58,7 +58,9 @@ python -m pip install --upgrade pip
 pip install pyqt6 patchright requests yt-dlp gTTS
 
 :: Create Desktop Shortcut on first run
-if not exist "%userprofile%\Desktop\GrowSnap One.lnk" call :create_shortcut
+set "DESKTOP_DIR=%userprofile%\Desktop"
+if exist "%userprofile%\OneDrive\Desktop" set "DESKTOP_DIR=%userprofile%\OneDrive\Desktop"
+if not exist "%DESKTOP_DIR%\GrowSnap One.lnk" call :create_shortcut
 
 :run_app
 echo Starting GrowSnap One...
@@ -73,8 +75,10 @@ exit /b
 
 :create_shortcut
 echo Creating Desktop Shortcut...
+set "DESKTOP_DIR=%userprofile%\Desktop"
+if exist "%userprofile%\OneDrive\Desktop" set "DESKTOP_DIR=%userprofile%\OneDrive\Desktop"
 echo Set oWS = CreateObject("WScript.Shell") > "%temp%\CreateShortcut.vbs"
-echo sLinkFile = "%userprofile%\Desktop\GrowSnap One.lnk" >> "%temp%\CreateShortcut.vbs"
+echo sLinkFile = "%DESKTOP_DIR%\GrowSnap One.lnk" >> "%temp%\CreateShortcut.vbs"
 echo Set oLink = oWS.CreateShortcut(sLinkFile) >> "%temp%\CreateShortcut.vbs"
 echo oLink.TargetPath = "%~dp0run_grow_snap.bat" >> "%temp%\CreateShortcut.vbs"
 echo oLink.WorkingDirectory = "%~dp0" >> "%temp%\CreateShortcut.vbs"
