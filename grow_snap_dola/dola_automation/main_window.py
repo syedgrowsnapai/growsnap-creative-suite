@@ -546,7 +546,7 @@ class MainWindow(QMainWindow):
         try:
             from PyQt6.QtWidgets import QGraphicsDropShadowEffect
             from PyQt6.QtGui import QColor
-            glow = QGraphicsDropShadowEffect(self)
+            glow = QGraphicsDropShadowEffect()
             glow.setBlurRadius(20)
             glow.setColor(QColor("#2ecc71"))
             glow.setOffset(0, 0)
