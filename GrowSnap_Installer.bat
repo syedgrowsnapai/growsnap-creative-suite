@@ -126,9 +126,10 @@ call .venv\Scripts\activate.bat
 python -m pip install --upgrade pip
 pip install pyqt6 patchright requests yt-dlp gTTS
 
-echo [Installer] Creating Desktop Shortcut...
+set "DESKTOP_DIR=%userprofile%\Desktop"
+if exist "%userprofile%\OneDrive\Desktop" set "DESKTOP_DIR=%userprofile%\OneDrive\Desktop"
 echo Set oWS = CreateObject("WScript.Shell") > "%temp%\CreateShortcut.vbs"
-echo sLinkFile = "%userprofile%\Desktop\GrowSnap One.lnk" >> "%temp%\CreateShortcut.vbs"
+echo sLinkFile = "%DESKTOP_DIR%\GrowSnap One.lnk" >> "%temp%\CreateShortcut.vbs"
 echo Set oLink = oWS.CreateShortcut(sLinkFile) >> "%temp%\CreateShortcut.vbs"
 echo oLink.TargetPath = "%~dp0GrowSnap One\run_grow_snap.bat" >> "%temp%\CreateShortcut.vbs"
 echo oLink.WorkingDirectory = "%~dp0GrowSnap One" >> "%temp%\CreateShortcut.vbs"

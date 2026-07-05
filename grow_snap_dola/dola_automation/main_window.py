@@ -530,7 +530,7 @@ class MainWindow(QMainWindow):
             self.btn_home_logo.setIconSize(QSize(28, 28))
             
         self.btn_home_logo.setText(" GrowSnap One")
-        self.btn_home_logo.clicked.connect(lambda: self._on_nav_changed(9))
+        self.btn_home_logo.clicked.connect(lambda: self._on_nav_changed(10))
         sidebar_layout.addWidget(self.btn_home_logo)
 
         # Accordion: CreativeSnap
