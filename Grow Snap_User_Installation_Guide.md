@@ -1,11 +1,11 @@
-# 🚀 GrowSnap One — Simplified Installation & Setup Guide
+# 🚀 Grow Snap 1 — Simplified Installation & Setup Guide
 
-This guide is designed for end-users to install, configure, and activate the **GrowSnap One** on any computer in one click.
+This guide is designed for end-users to install, configure, and activate the **Grow Snap 1** on any computer in one click.
 
 ---
 
 ## 📋 Step 1: Copy and Extract the Package
-1. Download or copy the **`GrowSnap_One.zip`** package onto your computer.
+1. Download or copy the **`Grow_Snap_1.zip`** package onto your computer.
 2. Move the ZIP file to a convenient folder (such as your `Documents` or `Desktop` directory).
 3. Right-click the `.zip` file and select **Extract All...** (on Windows) or double-click it (on macOS/Linux) to unzip the files.
 
@@ -34,7 +34,7 @@ After activation, the suite executes an automated first-run setup:
 - It checks for **FFmpeg** encoders (downloading static builds in the background if they are missing).
 - It verifies and installs the **Patchright Chromium** anti-detect browser driver.
 
-Once the setup progress bar reaches 100%, the main **GrowSnap One** dashboard will launch automatically, and you are ready to begin!
+Once the setup progress bar reaches 100%, the main **Grow Snap 1** dashboard will launch automatically, and you are ready to begin!
 
 ---
 
@@ -47,7 +47,7 @@ If the application fails to launch or gives command prompt errors:
 * **If it still fails**: Make sure you have installed Python 3.10 or newer from the official [python.org](https://www.python.org/downloads/) page. During installation, ensure you check the box that says **"Add python.exe to PATH"**.
 
 ### 2. Running as Administrator
-* **Supported**: You can safely right-click `run_grow_snap.bat` or `GrowSnap_Installer.bat` and select **"Run as Administrator"**. The script automatically corrects its working directory so that no files are misplaced in `C:\Windows\System32`.
+* **Supported**: You can safely right-click `run_grow_snap.bat` or `Grow Snap_Installer.bat` and select **"Run as Administrator"**. The script automatically corrects its working directory so that no files are misplaced in `C:\Windows\System32`.
 
 ### 3. Microsoft Store Redirects
 * If double-clicking the launcher opens the Microsoft Store instead of Python, our updated launcher will automatically bypass this redirect by executing the isolated local virtual environment (`.venv`) directly.

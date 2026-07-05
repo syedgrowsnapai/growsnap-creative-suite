@@ -1,6 +1,6 @@
 @echo off
 echo ===================================================
-echo   GrowSnap One — GitHub Installer
+echo   Grow Snap 1 — GitHub Installer
 echo ===================================================
 echo.
 
@@ -107,15 +107,15 @@ if not exist %EXTRACTED_FOLDER% (
 )
 
 :: Rename or copy contents
-if exist "GrowSnap One" (
-    echo [Installer] Updating existing GrowSnap One folder...
-    xcopy /E /I /Y %EXTRACTED_FOLDER% "GrowSnap One"
+if exist "Grow Snap 1" (
+    echo [Installer] Updating existing Grow Snap 1 folder...
+    xcopy /E /I /Y %EXTRACTED_FOLDER% "Grow Snap 1"
     rd /S /Q %EXTRACTED_FOLDER%
 ) else (
-    move %EXTRACTED_FOLDER% "GrowSnap One"
+    move %EXTRACTED_FOLDER% "Grow Snap 1"
 )
 
-cd "GrowSnap One"
+cd "Grow Snap 1"
 
 :: 3. Setup Virtual Environment
 echo [Installer] Creating virtual environment...
@@ -126,10 +126,22 @@ call .venv\Scripts\activate.bat
 python -m pip install --upgrade pip
 pip install pyqt6 patchright requests yt-dlp gTTS
 
+echo [Installer] Creating Desktop Shortcut...
+echo Set oWS = CreateObject("WScript.Shell") > "%temp%\CreateShortcut.vbs"
+echo sLinkFile = "%userprofile%\Desktop\Grow Snap 1.lnk" >> "%temp%\CreateShortcut.vbs"
+echo Set oLink = oWS.CreateShortcut(sLinkFile) >> "%temp%\CreateShortcut.vbs"
+echo oLink.TargetPath = "%~dp0Grow Snap 1\run_grow_snap.bat" >> "%temp%\CreateShortcut.vbs"
+echo oLink.WorkingDirectory = "%~dp0Grow Snap 1" >> "%temp%\CreateShortcut.vbs"
+echo oLink.Description = "Launch Grow Snap 1" >> "%temp%\CreateShortcut.vbs"
+echo oLink.IconLocation = "%~dp0Grow Snap 1\grow_snap_dola\dola_automation\resources\icon.ico" >> "%temp%\CreateShortcut.vbs"
+echo oLink.Save >> "%temp%\CreateShortcut.vbs"
+cscript /nologo "%temp%\CreateShortcut.vbs" >nul 2>&1
+del "%temp%\CreateShortcut.vbs" >nul 2>&1
+
 echo.
 echo ===================================================
 echo   Installation Completed Successfully!
-echo   Double-click 'run_grow_snap.bat' inside the
-echo   "GrowSnap One" folder to launch!
+echo   We have created a "Grow Snap 1" shortcut on your Desktop.
+echo   You can now launch the app directly from your Desktop!
 echo ===================================================
 pause

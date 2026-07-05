@@ -76,6 +76,19 @@ class HistoryDatabase:
                 CREATE INDEX IF NOT EXISTS idx_jobs_session ON jobs(session_id);
                 CREATE INDEX IF NOT EXISTS idx_downloads_job ON downloads(job_id);
             """)
+            
+            # Dynamic schema migrations for existing databases
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(jobs)")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            if "video_title" not in columns:
+                cursor.execute("ALTER TABLE jobs ADD COLUMN video_title TEXT")
+            if "scene_index" not in columns:
+                cursor.execute("ALTER TABLE jobs ADD COLUMN scene_index INTEGER")
+            if "caption" not in columns:
+                cursor.execute("ALTER TABLE jobs ADD COLUMN caption TEXT")
+                
             conn.commit()
         finally:
             conn.close()

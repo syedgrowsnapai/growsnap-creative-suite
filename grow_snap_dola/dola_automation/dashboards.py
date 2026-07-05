@@ -27,7 +27,7 @@ class MasterHomeDashboardWidget(QWidget):
         welcome_layout = QVBoxLayout(welcome_card)
         welcome_layout.setContentsMargins(20, 20, 20, 20)
         
-        title = GradientLabel("GrowSnap AI Console", self, font_size=24)
+        title = GradientLabel("Grow Snap 1 Console", self, font_size=24)
         welcome_layout.addWidget(title)
         
         desc = QLabel("Welcome to the unified operations center. Manage your automated content pipelines and outbound outreach campaigns completely from local servers.", self)

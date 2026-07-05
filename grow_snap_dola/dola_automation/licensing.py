@@ -8,7 +8,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Tuple
 
-SECRET_KEY = b"GrowSnapAI_Ultimate_Secret_2026_SecuredKey!"
+SECRET_KEY = b"Grow SnapAI_Ultimate_Secret_2026_SecuredKey!"
 
 def get_license_file_path() -> Path:
     base_dir = Path.home() / 'Documents' / 'dola_video_automation'
@@ -189,7 +189,7 @@ def check_license_stored() -> Tuple[bool, dict]:
             QMessageBox.critical(
                 None,
                 "License Revoked",
-                "Your licensing key for GrowSnap One has been revoked/cancelled.\n\n"
+                "Your licensing key for Grow Snap 1 has been revoked/cancelled.\n\n"
                 "Local files and settings have been cleaned up automatically."
             )
             return False, {}
