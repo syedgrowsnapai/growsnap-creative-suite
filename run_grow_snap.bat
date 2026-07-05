@@ -8,15 +8,7 @@ echo.
 :: 1. If virtual env already exists, run the application directly
 if exist .venv\Scripts\python.exe (
     if not exist "%userprofile%\Desktop\GrowSnap One.lnk" call :create_shortcut
-    echo Starting GrowSnap One...
-    ".venv\Scripts\python.exe" "grow_snap_dola\main.py" %*
-    if %errorlevel% neq 0 (
-        echo.
-        echo [ERROR] GrowSnap One exited with error code %errorlevel%
-        echo Please take a screenshot of this error and report it.
-        pause
-    )
-    exit /b
+    goto run_app
 )
 
 :: 2. If virtual env doesn't exist, search for python
@@ -68,8 +60,15 @@ pip install pyqt6 patchright requests yt-dlp gTTS
 :: Create Desktop Shortcut on first run
 if not exist "%userprofile%\Desktop\GrowSnap One.lnk" call :create_shortcut
 
+:run_app
 echo Starting GrowSnap One...
-python grow_snap_dola/main.py %*
+".venv\Scripts\python.exe" "grow_snap_dola\main.py" %*
+if %errorlevel% neq 0 (
+    echo.
+    echo [ERROR] GrowSnap One exited with error code %errorlevel%
+    echo Please take a screenshot of this error and report it.
+    pause
+)
 exit /b
 
 :create_shortcut
