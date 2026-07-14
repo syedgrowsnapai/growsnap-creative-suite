@@ -11,12 +11,11 @@ from PyQt6.QtWidgets import (
     QProgressBar, QTableWidget, QTableWidgetItem, QCheckBox, QSpinBox, QComboBox,
     QFileDialog, QMessageBox, QSplitter, QListWidget, QListWidgetItem, QLineEdit, QPlainTextEdit,
     QGroupBox, QHeaderView, QAbstractItemView, QFrame, QButtonGroup, QTabWidget, QScrollArea,
-    QStylePainter, QStyleOptionComboBox, QMenu, QApplication
+    QStylePainter, QStyleOptionComboBox, QMenu, QApplication, QStyle, QDialog, QFormLayout, QDialogButtonBox
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot, QTimer, QTime, QEvent
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot, QTimer, QTime, QEvent, QSize
 from PyQt6.QtGui import QColor, QIcon, QPalette, QStandardItemModel, QStandardItem
 
-# Check if QWebEngineView is available
 try:
     from PyQt6.QtWebEngineWidgets import QWebEngineView
     WEB_ENGINE_AVAILABLE = True
@@ -25,7 +24,6 @@ except ImportError:
 
 from dola_automation.models import AutomationSettings, PromptJob, JobStatus, parse_prompts, align_reference_images
 from dola_automation.styles import GradientLabel, STATUS_COLORS
-from PyQt6.QtWidgets import QStyle
 
 class CheckableComboBox(QComboBox):
     checkedItemsChanged = pyqtSignal()
@@ -107,6 +105,60 @@ class CheckableComboBox(QComboBox):
         painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, opt)
         painter.drawControl(QStyle.ControlElement.CE_ComboBoxLabel, opt)
 
+class JobDialog(QDialog):
+    def __init__(self, parent=None, job=None):
+        super().__init__(parent)
+        self.setWindowTitle("Edit Job Row" if job else "Add Job Row")
+        self.setMinimumWidth(400)
+        
+        layout = QFormLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+        
+        self.edit_title = QLineEdit(self)
+        self.edit_title.setText(job.video_title if job else "Video_1")
+        
+        self.edit_scene = QSpinBox(self)
+        self.edit_scene.setRange(1, 100)
+        self.edit_scene.setValue(job.scene_index if job else 1)
+        
+        self.edit_prompt = QPlainTextEdit(self)
+        self.edit_prompt.setPlainText(job.prompt if job else "")
+        self.edit_prompt.setMinimumHeight(80)
+        
+        self.edit_ref = QLineEdit(self)
+        self.edit_ref.setText(job.reference_image if job else "")
+        self.btn_pick_ref = QPushButton("Browse...", self)
+        self.btn_pick_ref.clicked.connect(self._browse_ref)
+        
+        ref_row = QHBoxLayout()
+        ref_row.addWidget(self.edit_ref)
+        ref_row.addWidget(self.btn_pick_ref)
+        ref_row.setContentsMargins(0, 0, 0, 0)
+        
+        layout.addRow("Video Title:", self.edit_title)
+        layout.addRow("Scene Index:", self.edit_scene)
+        layout.addRow("Prompt:", self.edit_prompt)
+        layout.addRow("Reference Image:", ref_row)
+        
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+        
+    def _browse_ref(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select Reference Image", "", "Image Files (*.png *.jpg *.jpeg)")
+        if file_path:
+            self.edit_ref.setText(file_path)
+            
+    def get_data(self):
+        return {
+            "video_title": self.edit_title.text().strip(),
+            "scene_index": self.edit_scene.value(),
+            "prompt": self.edit_prompt.toPlainText().strip(),
+            "reference_image": self.edit_ref.text().strip() or None
+        }
+
 
 class SnapGenAutomationWidget(QWidget):
     def __init__(self, parent=None, db_path=None, global_settings=None):
@@ -120,6 +172,7 @@ class SnapGenAutomationWidget(QWidget):
     def _stat_card(self, label_text: str, default_val: str) -> QFrame:
         card = QFrame(self)
         card.setObjectName("stat_card")
+        card.setFixedHeight(80)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(10, 10, 10, 10)
         lbl = QLabel(label_text, card)
@@ -161,6 +214,7 @@ class SnapGenAutomationWidget(QWidget):
         # Timer Card
         timer_card = QFrame(self)
         timer_card.setObjectName("stat_card")
+        timer_card.setFixedHeight(80)
         timer_card_layout = QVBoxLayout(timer_card)
         timer_label_lbl = QLabel("ELAPSED TIME", timer_card)
         timer_label_lbl.setObjectName("statLabel")
@@ -784,6 +838,22 @@ class SnapGenAutomationWidget(QWidget):
                 actions.append(copy_path_action)
             menu.addSeparator()
             
+        # Row modification operations
+        add_row_action = menu.addAction("Add New Row")
+        add_row_action.triggered.connect(self._context_add_row)
+        actions.append(add_row_action)
+        
+        if selected_rows:
+            edit_row_action = menu.addAction("Edit Selected Row...")
+            edit_row_action.triggered.connect(self._context_edit_row)
+            actions.append(edit_row_action)
+            
+            duplicate_row_action = menu.addAction("Copy/Duplicate Selected Rows")
+            duplicate_row_action.triggered.connect(self._context_duplicate_rows)
+            actions.append(duplicate_row_action)
+            
+        menu.addSeparator()
+        
         # 2. Selection Modification
         toggle_check_action = menu.addAction("Toggle Checkbox for Selected Rows")
         toggle_check_action.triggered.connect(self._context_toggle_checks)
@@ -825,6 +895,61 @@ class SnapGenAutomationWidget(QWidget):
         actions.append(remove_action)
         
         menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _context_add_row(self):
+        dialog = JobDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            data = dialog.get_data()
+            new_job = PromptJob(
+                index=len(self.jobs) + 1,
+                prompt=data["prompt"],
+                caption="",
+                video_title=data["video_title"],
+                scene_index=data["scene_index"],
+                reference_image=data["reference_image"],
+                status=JobStatus.PENDING
+            )
+            self.jobs.append(new_job)
+            self._refresh_table()
+            self._update_stats()
+            
+    def _context_edit_row(self):
+        selected_rows = list(set(idx.row() for idx in self.table.selectedIndexes()))
+        if not selected_rows:
+            return
+        row = selected_rows[0]
+        if 0 <= row < len(self.jobs):
+            job = self.jobs[row]
+            dialog = JobDialog(self, job)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                data = dialog.get_data()
+                job.prompt = data["prompt"]
+                job.video_title = data["video_title"]
+                job.scene_index = data["scene_index"]
+                job.reference_image = data["reference_image"]
+                self._refresh_table()
+                
+    def _context_duplicate_rows(self):
+        selected_rows = sorted(list(set(idx.row() for idx in self.table.selectedIndexes())))
+        if not selected_rows:
+            return
+        new_jobs = []
+        for r in selected_rows:
+            if 0 <= r < len(self.jobs):
+                orig = self.jobs[r]
+                dup = PromptJob(
+                    index=len(self.jobs) + len(new_jobs) + 1,
+                    prompt=orig.prompt,
+                    caption=orig.caption,
+                    video_title=orig.video_title,
+                    scene_index=orig.scene_index,
+                    reference_image=orig.reference_image,
+                    status=JobStatus.PENDING
+                )
+                new_jobs.append(dup)
+        self.jobs.extend(new_jobs)
+        self._refresh_table()
+        self._update_stats()
 
     def _context_toggle_checks(self):
         selected_rows = list(set(idx.row() for idx in self.table.selectedIndexes()))
@@ -1107,103 +1232,208 @@ class OpenCutVideoEditorWidget(QWidget):
         lbl_subtitle.setObjectName("subtitle")
         lbl_subtitle.setFixedHeight(20)
         layout.addWidget(lbl_subtitle)
-
-        splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        layout.addWidget(splitter)
-
-        # Left side: AI Video Director / Editor wrapped in QScrollArea
-        left_scroll = QScrollArea(self)
+        self.tabs = QTabWidget(self)
+        layout.addWidget(self.tabs)
+ 
+        # Tab 1: AI-Powered Editing
+        tab1_widget = QWidget()
+        tab1_layout = QVBoxLayout(tab1_widget)
+        tab1_layout.setContentsMargins(0, 0, 0, 0)
+ 
+        left_scroll = QScrollArea()
         left_scroll.setWidgetResizable(True)
         left_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
-        left = QGroupBox("AI-POWERED VIDEO EDITOR", self)
+        left = QGroupBox("AI-POWERED VIDEO EDITOR — Submit a request with AI-powered editing")
         left_lay = QVBoxLayout(left)
         
-        left_lay.addWidget(QLabel("Raw Video File Path:", self))
+        left_lay.addWidget(QLabel("Raw Video File Path:"))
         file_row = QHBoxLayout()
-        self.edit_video_path = QLineEdit(self)
+        self.edit_video_path = QLineEdit()
         self.edit_video_path.setPlaceholderText("Path to video file to edit...")
-        btn_browse = QPushButton("Select File", self)
+        btn_browse = QPushButton("Select File")
         btn_browse.clicked.connect(self._pick_video_file)
         file_row.addWidget(self.edit_video_path)
         file_row.addWidget(btn_browse)
         left_lay.addLayout(file_row)
- 
-        left_lay.addWidget(QLabel("AI Editing Instructions:", self))
-        self.edit_instructions = QPlainTextEdit(self)
+  
+        left_lay.addWidget(QLabel("AI Editing Instructions:"))
+        self.edit_instructions = QPlainTextEdit()
         self.edit_instructions.setPlaceholderText("Examples:\n- Cut out all silences and add zoom transitions.\n- Auto-crop video into vertical (9:16) framing focus on speakers.\n- Add burned-in animated subtitles and energetic edits.")
         left_lay.addWidget(self.edit_instructions)
- 
-        self.btn_process = QPushButton("🎬 Start AI-Powered Compilation", self)
+  
+        self.btn_process = QPushButton("🎬 Start AI-Powered Compilation")
         self.btn_process.setObjectName("primary")
         self.btn_process.clicked.connect(self._run_ai_edit)
         left_lay.addWidget(self.btn_process)
- 
-        self.progress_bar = QProgressBar(self)
+  
+        self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         left_lay.addWidget(self.progress_bar)
- 
-        self.txt_log = QPlainTextEdit(self)
+  
+        self.txt_log = QPlainTextEdit()
         self.txt_log.setReadOnly(True)
         self.txt_log.setPlaceholderText("Console output log...")
         left_lay.addWidget(self.txt_log)
- 
-        # Help / Instructions buttons row (exactly matching Dola)
+  
         help_row = QHBoxLayout()
-        self.btn_instructions = QPushButton("Instructions", self)
+        self.btn_instructions = QPushButton("Instructions")
         self.btn_instructions.clicked.connect(lambda: self.window()._show_tool_popup_guide(17))
-        self.btn_issues = QPushButton("Issues/Fixes", self)
+        self.btn_issues = QPushButton("Issues/Fixes")
         self.btn_issues.clicked.connect(lambda: self.window()._show_issues_dialog() if hasattr(self.window(), '_show_issues_dialog') else None)
-        self.btn_upgrade = QPushButton("Upgrade your plan", self)
+        self.btn_upgrade = QPushButton("Upgrade your plan")
         self.btn_upgrade.setObjectName("primary")
         self.btn_upgrade.clicked.connect(lambda: self.window()._open_premium_whatsapp() if hasattr(self.window(), '_open_premium_whatsapp') else None)
         help_row.addWidget(self.btn_instructions)
         help_row.addWidget(self.btn_issues)
         help_row.addWidget(self.btn_upgrade)
         left_lay.addLayout(help_row)
- 
+  
         left_scroll.setWidget(left)
-        splitter.addWidget(left_scroll)
-
-        # Right side: Manual Timeline Editor Web Workspace
-        right = QGroupBox("MANUAL TIMELINE VIDEO EDITOR (OPENCUT UI)", self)
+        tab1_layout.addWidget(left_scroll)
+        self.tabs.addTab(tab1_widget, "🤖 AI-Powered Editing")
+ 
+        # Tab 2: Manual Timeline Editing
+        tab2_widget = QWidget()
+        tab2_layout = QVBoxLayout(tab2_widget)
+        tab2_layout.setContentsMargins(0, 0, 0, 0)
+ 
+        manual_scroll = QScrollArea()
+        manual_scroll.setWidgetResizable(True)
+        manual_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+ 
+        manual_container = QWidget()
+        manual_lay = QVBoxLayout(manual_container)
+        manual_lay.setContentsMargins(10, 10, 10, 10)
+        manual_lay.setSpacing(15)
+ 
+        # Group 1: Headed Web Interface Launcher
+        launch_card = QGroupBox("1. Headed Web Interface Launcher")
+        launch_card_lay = QVBoxLayout(launch_card)
+        self.btn_launch_web = QPushButton("🚀 Launch OpenCut Web Editor in headed browser")
+        self.btn_launch_web.setObjectName("primary")
+        self.btn_launch_web.setStyleSheet("padding: 12px; font-weight: bold; font-size: 13px;")
+        self.btn_launch_web.clicked.connect(self._launch_web_editor)
+        
+        chk_lay = QGridLayout()
+        self.chk_feat_timeline = QCheckBox("Timeline Trimming & Multi-Track Editing (Standard)")
+        self.chk_feat_timeline.setChecked(True)
+        self.chk_feat_audio = QCheckBox("Advanced Audio Mixing & Bg Music Synchronization")
+        self.chk_feat_audio.setChecked(True)
+        self.chk_feat_transitions = QCheckBox("Dynamic Transition Effects & Ken Burns Zoom Engine")
+        self.chk_feat_transitions.setChecked(True)
+        self.chk_feat_titles = QCheckBox("Title Overlays, Stickers, & Custom Watermarks")
+        self.chk_feat_titles.setChecked(True)
+        
+        chk_lay.addWidget(self.chk_feat_timeline, 0, 0)
+        chk_lay.addWidget(self.chk_feat_audio, 0, 1)
+        chk_lay.addWidget(self.chk_feat_transitions, 1, 0)
+        chk_lay.addWidget(self.chk_feat_titles, 1, 1)
+        
+        launch_card_lay.addWidget(self.btn_launch_web)
+        launch_card_lay.addLayout(chk_lay)
+        manual_lay.addWidget(launch_card)
+ 
+        # Group 2: Output Configurations
+        param_card = QGroupBox("2. Timeline Output configurations")
+        param_grid = QGridLayout(param_card)
+        
+        param_grid.addWidget(QLabel("Output Resolution Profile:"), 0, 0)
+        self.combo_resolution = QComboBox()
+        self.combo_resolution.addItems(["🎬 16:9 Landscape (YouTube/Default)", "📱 9:16 Vertical (Shorts/TikTok)", "🔲 1:1 Square (Instagram)"])
+        param_grid.addWidget(self.combo_resolution, 0, 1)
+ 
+        param_grid.addWidget(QLabel("Burn-in subtitle settings:"), 1, 0)
+        self.combo_subtitle_style = QComboBox()
+        self.combo_subtitle_style.addItems(["Standard White with shadow", "Kinetic Bold Yellow", "Word-by-word highlights"])
+        param_grid.addWidget(self.combo_subtitle_style, 1, 1)
+ 
+        param_grid.addWidget(QLabel("Audio mixing presets:"), 2, 0)
+        self.combo_audio_mix = QComboBox()
+        self.combo_audio_mix.addItems(["Ducker (auto-lower bg music on voice)", "Balanced (50-50 sound ratio)", "Instrumental focus"])
+        param_grid.addWidget(self.combo_audio_mix, 2, 1)
+ 
+        self.chk_gpu = QCheckBox("Use GPU Hardware Acceleration (FFmpeg NVENC/AMF)")
+        self.chk_gpu.setChecked(True)
+        param_grid.addWidget(self.chk_gpu, 3, 0, 1, 2)
+        manual_lay.addWidget(param_card)
+ 
+        # Group 3: Manual Editor Controls (Web View placeholder)
+        right = QGroupBox("3. Offline Manual Timeline Editor")
         right_lay = QVBoxLayout(right)
-
+ 
         if WEB_ENGINE_AVAILABLE:
-            self.web_view = QWebEngineView(self)
-            self.web_view.setUrl(Path.home() / 'Documents' / 'opencut_web' / 'index.html') # local web instance
-            # For prototype safety: fall back to a placeholder visual representation if local server not running
+            self.web_view = QWebEngineView()
+            self.web_view.setUrl(Path.home() / 'Documents' / 'opencut_web' / 'index.html')
             right_lay.addWidget(self.web_view)
         else:
-            # High-fidelity manual editing control panel fallback
-            placeholder = QWidget(self)
+            placeholder = QWidget()
             play_lay = QGridLayout(placeholder)
             
-            # Simulated player screen
-            self.lbl_screen = QLabel(self)
+            self.lbl_screen = QLabel()
             self.lbl_screen.setStyleSheet("background-color: #0b0f19; border: 1px solid #1a2333; border-radius: 6px;")
             self.lbl_screen.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.lbl_screen.setText("🎞️ OpenCut Manual Video Preview Canvas")
+            self.lbl_screen.setMinimumHeight(150)
             play_lay.addWidget(self.lbl_screen, 0, 0, 1, 4)
-
-            # Slicing timeline track layout mockup
-            self.lbl_track = QLabel("Timeline Track: [Video File 1.mp4] [Cut: 00:05-00:23] [Audio overlay.mp3]", self)
+ 
+            self.lbl_track = QLabel("Timeline Track: [Video File 1.mp4] [Cut: 00:05-00:23] [Audio overlay.mp3]")
             self.lbl_track.setStyleSheet("background-color: #162235; border-radius: 4px; padding: 10px; color: #4ade80; font-family: monospace;")
             play_lay.addWidget(self.lbl_track, 1, 0, 1, 4)
-
-            btn_play = QPushButton("◀ Play", self)
-            btn_split = QPushButton("✂ Split Track", self)
-            btn_delete = QPushButton("🗑️ Remove", self)
-            btn_add_text = QPushButton("✍ Add Text Track", self)
+ 
+            btn_play = QPushButton("◀ Play")
+            btn_split = QPushButton("✂ Split Track")
+            btn_delete = QPushButton("🗑️ Remove")
+            btn_add_text = QPushButton("✍ Add Text Track")
             play_lay.addWidget(btn_play, 2, 0)
             play_lay.addWidget(btn_split, 2, 1)
             play_lay.addWidget(btn_delete, 2, 2)
             play_lay.addWidget(btn_add_text, 2, 3)
-
+ 
             right_lay.addWidget(placeholder)
+        
+        manual_lay.addWidget(right)
+        manual_lay.addStretch()
+ 
+        manual_scroll.setWidget(manual_container)
+        tab2_layout.addWidget(manual_scroll)
+        self.tabs.addTab(tab2_widget, "✂️ Manual Timeline Editing")
 
-        splitter.addWidget(right)
-        splitter.setSizes([450, 550])
+    def _launch_web_editor(self):
+        import os
+        import time
+        from pathlib import Path
+        import threading
+        
+        def _launch():
+            try:
+                from playwright.sync_api import sync_playwright
+            except ImportError:
+                try:
+                    from patchright.sync_api import sync_playwright
+                except ImportError:
+                    self.txt_log.appendPlainText("[OpenCut Web] Playwright library not found. Please run 'pip install playwright'.")
+                    return
+            
+            try:
+                with sync_playwright() as p:
+                    launch_args = []
+                    if os.name != 'nt':
+                        launch_args.extend(["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
+                    browser = p.chromium.launch(headless=False, args=launch_args)
+                    page = browser.new_page()
+                    web_path = Path.home() / 'Documents' / 'opencut_web' / 'index.html'
+                    if web_path.exists():
+                        page.goto(web_path.as_uri())
+                    else:
+                        page.goto("https://github.com/syedgrowsnapai/growsnap-creative-suite")
+                    while not page.is_closed():
+                        time.sleep(1)
+            except Exception as e:
+                self.txt_log.appendPlainText(f"[OpenCut Web Error] Failed to launch Playwright: {e}")
+        
+        self.txt_log.appendPlainText("[OpenCut Web] Initiating manual video workspace browser in background thread...")
+        threading.Thread(target=_launch, daemon=True).start()
 
     def _pick_video_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Pick Raw Video", "", "Video Files (*.mp4 *.mov *.avi)")
@@ -1267,64 +1497,64 @@ class AIVideoClipperWidget(QWidget):
         scroll_layout = QVBoxLayout(scroll_widget)
         scroll_layout.setContentsMargins(0, 0, 0, 0)
         scroll_layout.setSpacing(15)
-
+ 
         grid = QGridLayout()
         scroll_layout.addLayout(grid)
-
-        grid.addWidget(QLabel("Long Video File Path:", self), 0, 0)
-        self.edit_video = QLineEdit(self)
+ 
+        grid.addWidget(QLabel("Long Video File Path:"), 0, 0)
+        self.edit_video = QLineEdit()
         self.edit_video.setPlaceholderText("Select raw 1-3 hour video file to clip...")
         grid.addWidget(self.edit_video, 0, 1)
-
-        btn_browse = QPushButton("Select File", self)
+ 
+        btn_browse = QPushButton("Select File")
         btn_browse.clicked.connect(self._browse_file)
         grid.addWidget(btn_browse, 0, 2)
-
-        grid.addWidget(QLabel("Number of Clips:", self), 1, 0)
-        self.spin_clips = QSpinBox(self)
+ 
+        grid.addWidget(QLabel("Number of Clips:"), 1, 0)
+        self.spin_clips = QSpinBox()
         self.spin_clips.setRange(1, 100)
         self.spin_clips.setValue(5)
         grid.addWidget(self.spin_clips, 1, 1)
-
-        grid.addWidget(QLabel("Clip Style/Theme:", self), 2, 0)
-        self.combo_theme = QComboBox(self)
+ 
+        grid.addWidget(QLabel("Clip Style/Theme:"), 2, 0)
+        self.combo_theme = QComboBox()
         self.combo_theme.addItems(["Funny Moments Highlights", "Educational/Explainer Shorts", "High-Energy Hooks & CTAs", "Podcast Dialog Slices"])
         grid.addWidget(self.combo_theme, 2, 1)
-
-        grid.addWidget(QLabel("On-Screen Captions:", self), 3, 0)
-        self.combo_captions = QComboBox(self)
+ 
+        grid.addWidget(QLabel("On-Screen Captions:"), 3, 0)
+        self.combo_captions = QComboBox()
         self.combo_captions.addItems(["Burn-in Animated Subtitles (Bold Yellow/White)", "Classic SRT Subtitles", "No Captions"])
         grid.addWidget(self.combo_captions, 3, 1)
-
+ 
         # Run Button
-        self.btn_run = QPushButton("⚡ Chop & Generate Short Clips", self)
+        self.btn_run = QPushButton("⚡ Chop & Generate Short Clips")
         self.btn_run.setObjectName("primary")
         self.btn_run.clicked.connect(self._run_clipper)
         scroll_layout.addWidget(self.btn_run)
-
-        self.progress = QProgressBar(self)
+ 
+        self.progress = QProgressBar()
         self.progress.setVisible(False)
         scroll_layout.addWidget(self.progress)
-
-        self.log_console = QPlainTextEdit(self)
+ 
+        self.log_console = QPlainTextEdit()
         self.log_console.setReadOnly(True)
         self.log_console.setPlaceholderText("Clipper progress logs...")
         scroll_layout.addWidget(self.log_console)
-
+ 
         # Help / Instructions buttons row (exactly matching Dola)
         help_row = QHBoxLayout()
-        self.btn_instructions = QPushButton("Instructions", self)
+        self.btn_instructions = QPushButton("Instructions")
         self.btn_instructions.clicked.connect(lambda: self.window()._show_tool_popup_guide(18))
-        self.btn_issues = QPushButton("Issues/Fixes", self)
+        self.btn_issues = QPushButton("Issues/Fixes")
         self.btn_issues.clicked.connect(lambda: self.window()._show_issues_dialog() if hasattr(self.window(), '_show_issues_dialog') else None)
-        self.btn_upgrade = QPushButton("Upgrade your plan", self)
+        self.btn_upgrade = QPushButton("Upgrade your plan")
         self.btn_upgrade.setObjectName("primary")
         self.btn_upgrade.clicked.connect(lambda: self.window()._open_premium_whatsapp() if hasattr(self.window(), '_open_premium_whatsapp') else None)
         help_row.addWidget(self.btn_instructions)
         help_row.addWidget(self.btn_issues)
         help_row.addWidget(self.btn_upgrade)
         scroll_layout.addLayout(help_row)
-
+ 
         scroll.setWidget(scroll_widget)
         layout.addWidget(scroll)
 
@@ -1363,6 +1593,28 @@ class AIVideoClipperWidget(QWidget):
         threading.Thread(target=clip_proc, daemon=True).start()
 
 
+class CreationCardWidget(QWidget):
+    def __init__(self, title, prompt, gradient_css, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+        
+        self.lbl_thumb = QLabel()
+        self.lbl_thumb.setFixedHeight(120)
+        self.lbl_thumb.setStyleSheet(f"border-radius: 8px; {gradient_css}")
+        
+        self.lbl_title = QLabel(f"<b>🎨 {title}</b>")
+        self.lbl_title.setStyleSheet("color: #e2e8f0; font-size: 13px;")
+        
+        self.lbl_prompt = QLabel(prompt)
+        self.lbl_prompt.setWordWrap(True)
+        self.lbl_prompt.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        
+        layout.addWidget(self.lbl_thumb)
+        layout.addWidget(self.lbl_title)
+        layout.addWidget(self.lbl_prompt)
+
 class CommunityShowcaseWidget(QWidget):
     def __init__(self, parent=None, db_path=None, global_settings=None):
         super().__init__(parent)
@@ -1374,7 +1626,7 @@ class CommunityShowcaseWidget(QWidget):
         layout.setSpacing(15)
 
         # Subtitle
-        lbl_subtitle = QLabel("COMMUNITY SHOWCASE — trending prompts feed and templates library", self)
+        lbl_subtitle = QLabel("COMMUNITY SHOWCASE — trending prompts feed and templates library")
         lbl_subtitle.setObjectName("subtitle")
         lbl_subtitle.setFixedHeight(20)
         layout.addWidget(lbl_subtitle)
@@ -1382,45 +1634,58 @@ class CommunityShowcaseWidget(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         layout.addWidget(splitter)
 
-        # Left: meigen.ai Mock feed visual grid
-        left = QGroupBox("COMMUNITY VISUAL FEED (MAJ / MEIGEN.AI)", self)
+        # Left Column Scroll Area
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
+        left = QGroupBox("COMMUNITY VISUAL FEED (MAJ / MEIGEN.AI)")
         left_lay = QVBoxLayout(left)
 
-        self.list_gallery = QListWidget(self)
-        self.list_gallery.setSpacing(8)
+        self.list_gallery = QListWidget()
+        self.list_gallery.setSpacing(12)
         self.list_gallery.itemClicked.connect(self._copy_prompt)
         left_lay.addWidget(self.list_gallery)
         
         # Populate gallery mock creations with descriptions and prompts
         creations = [
-            ("Cinematic Portrait of Cyberpunk Cyborg", "hyper-detailed, Orbitron glow, dark neon atmospheric lighting, volumetric smoke, unreal engine render, 8k --ar 16:9"),
-            ("3D Glossy Liquid Abstract Art", "glassmorphic fluid simulation, rainbow reflections, glowing mesh overlay, premium background art --v 6.0"),
-            ("Neon Green Retro Sports Car", "drifting on rain-slicked asphalt streets at night, synthwave aesthetic, detailed reflection mapping"),
-            ("Glassmorphic Widget Dashboard Mockup", "futuristic UI interface design, dark mode glowing neon accents, clean sans font --ar 4:3"),
-            ("Steaming cup of coffee on workspace", "soft window morning glow, photorealistic, cinematic camera blur, warm color grading")
+            ("Cinematic Portrait of Cyberpunk Cyborg", "hyper-detailed, Orbitron glow, dark neon atmospheric lighting, volumetric smoke, unreal engine render, 8k --ar 16:9", "background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1a0b2e, stop:0.5 #8b5cf6, stop:1 #ec4899);"),
+            ("3D Glossy Liquid Abstract Art", "glassmorphic fluid simulation, rainbow reflections, glowing mesh overlay, premium background art --v 6.0", "background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0f172a, stop:0.5 #3b82f6, stop:1 #06b6d4);"),
+            ("Neon Green Retro Sports Car", "drifting on rain-slicked asphalt streets at night, synthwave aesthetic, detailed reflection mapping", "background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #064e3b, stop:0.5 #10b981, stop:1 #f59e0b);"),
+            ("Glassmorphic Widget Dashboard Mockup", "futuristic UI interface design, dark mode glowing neon accents, clean sans font --ar 4:3", "background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #312e81, stop:0.5 #4f46e5, stop:1 #a855f7);"),
+            ("Steaming cup of coffee on workspace", "soft window morning glow, photorealistic, cinematic camera blur, warm color grading", "background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #7c2d12, stop:0.5 #d97706, stop:1 #fde047);")
         ]
         
-        for item, prompt in creations:
-            list_item = QListWidgetItem(f"🎨 {item}\nPrompt: \"{prompt}\"")
+        for item, prompt, grad in creations:
+            list_item = QListWidgetItem(self.list_gallery)
             list_item.setData(Qt.ItemDataRole.UserRole, prompt)
+            list_item.setSizeHint(QSize(250, 200))
             self.list_gallery.addItem(list_item)
+            
+            card = CreationCardWidget(item, prompt, grad)
+            self.list_gallery.setItemWidget(list_item, card)
 
         btn_row = QHBoxLayout()
-        btn_copy = QPushButton("📋 Copy Selected Prompt", self)
+        btn_copy = QPushButton("📋 Copy Selected Prompt")
         btn_copy.clicked.connect(self._copy_prompt)
-        btn_send = QPushButton("⚡ Send to Generator", self)
+        btn_send = QPushButton("⚡ Send to Generator")
         btn_send.clicked.connect(self._send_to_generator)
         btn_row.addWidget(btn_copy)
         btn_row.addWidget(btn_send)
         left_lay.addLayout(btn_row)
 
-        splitter.addWidget(left)
+        left_scroll.setWidget(left)
+        splitter.addWidget(left_scroll)
 
-        # Right: Prompt Template Library (Nano Banana / Creative Toolkit)
-        right = QGroupBox("PROMPT TEMPLATES & SKILLS", self)
+        # Right Column Scroll Area
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
+        right = QGroupBox("PROMPT TEMPLATES & SKILLS")
         right_lay = QVBoxLayout(right)
 
-        self.list_templates = QListWidget(self)
+        self.list_templates = QListWidget()
         self.list_templates.itemClicked.connect(self._copy_template)
         right_lay.addWidget(self.list_templates)
 
@@ -1436,11 +1701,12 @@ class CommunityShowcaseWidget(QWidget):
             list_item.setData(Qt.ItemDataRole.UserRole, prompt)
             self.list_templates.addItem(list_item)
 
-        btn_copy_t = QPushButton("📋 Copy Template", self)
+        btn_copy_t = QPushButton("📋 Copy Template")
         btn_copy_t.clicked.connect(self._copy_template)
         right_lay.addWidget(btn_copy_t)
 
-        splitter.addWidget(right)
+        right_scroll.setWidget(right)
+        splitter.addWidget(right_scroll)
         splitter.setSizes([500, 500])
 
         # Help / Instructions buttons row (exactly matching Dola)
@@ -1491,7 +1757,15 @@ class AIModelsSandboxWidget(QWidget):
         self._init_ui()
 
     def _init_ui(self):
-        layout = QVBoxLayout(self)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
+        scroll_widget = QWidget()
+        layout = QVBoxLayout(scroll_widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(15)
 
@@ -1549,3 +1823,6 @@ class AIModelsSandboxWidget(QWidget):
         help_row.addWidget(self.btn_issues)
         help_row.addWidget(self.btn_upgrade)
         layout.addLayout(help_row)
+
+        scroll.setWidget(scroll_widget)
+        main_layout.addWidget(scroll)

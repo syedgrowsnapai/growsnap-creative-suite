@@ -63,7 +63,7 @@ class PlatformAutomatorWidget(QWidget):
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(15)
 
         # 1. Header Card

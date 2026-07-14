@@ -51,35 +51,35 @@ class VoiceClonerWidget(QWidget):
 
     def _build_ui(self):
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(20)
-
+ 
         # Scroll wrapper for Left Panel
         left_scroll = QScrollArea(self)
         left_scroll.setWidgetResizable(True)
         left_scroll.setFrameShape(QFrame.Shape.NoFrame)
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
+ 
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(15)
-
+ 
         # Group 1: Narration Script
-        script_group = QGroupBox("1. Narration Script Input", self)
+        script_group = QGroupBox("1. Narration Script Input")
         script_layout = QVBoxLayout(script_group)
-        self.script_input = QPlainTextEdit(self)
+        self.script_input = QPlainTextEdit()
         self.script_input.setPlaceholderText("Enter or paste the text you want the cloned voice to speak here...")
         self.script_input.setPlainText("Lunathread is a dynamic storytelling app that grows with your child. Tonight's story is generated based on their day.")
         script_layout.addWidget(self.script_input)
         left_layout.addWidget(script_group)
-
+ 
         # Group 2: Style Tunings
-        style_group = QGroupBox("2. Speech Style Options", self)
+        style_group = QGroupBox("2. Speech Style Options")
         style_grid = QGridLayout(style_group)
         
-        style_grid.addWidget(QLabel("Speech Style Presets:", self), 0, 0)
-        self.combo_presets = QComboBox(self)
+        style_grid.addWidget(QLabel("Speech Style Presets:"), 0, 0)
+        self.combo_presets = QComboBox()
         self.combo_presets.addItems([
             "Marketing / Promotional",
             "Operational / Instructions",
@@ -96,176 +96,176 @@ class VoiceClonerWidget(QWidget):
         self.combo_presets.setCurrentText("Marketing / Promotional")
         self.combo_presets.currentTextChanged.connect(self._on_preset_changed)
         style_grid.addWidget(self.combo_presets, 0, 1)
-
-        style_grid.addWidget(QLabel("Tone / Emotion:", self), 1, 0)
-        self.combo_tone = QComboBox(self)
+ 
+        style_grid.addWidget(QLabel("Tone / Emotion:"), 1, 0)
+        self.combo_tone = QComboBox()
         self.combo_tone.addItems(["Neutral", "Excited / High Energy", "Warm / Caring", "Professional / Serious", "Whisper / Soft"])
         style_grid.addWidget(self.combo_tone, 1, 1)
-
+ 
         # Custom Speed
-        style_grid.addWidget(QLabel("Custom Speed:", self), 2, 0)
-        self.slider_speed = QSlider(Qt.Orientation.Horizontal, self)
+        style_grid.addWidget(QLabel("Custom Speed:"), 2, 0)
+        self.slider_speed = QSlider(Qt.Orientation.Horizontal)
         self.slider_speed.setRange(50, 200)
         self.slider_speed.setValue(110)
-        self.lbl_speed_val = QLabel("1.10x", self)
+        self.lbl_speed_val = QLabel("1.10x")
         self.slider_speed.valueChanged.connect(self._on_speed_changed)
         speed_row = QHBoxLayout()
         speed_row.addWidget(self.slider_speed)
         speed_row.addWidget(self.lbl_speed_val)
         style_grid.addLayout(speed_row, 2, 1)
-
+ 
         # Custom Pitch
-        style_grid.addWidget(QLabel("Custom Pitch:", self), 3, 0)
-        self.slider_pitch = QSlider(Qt.Orientation.Horizontal, self)
+        style_grid.addWidget(QLabel("Custom Pitch:"), 3, 0)
+        self.slider_pitch = QSlider(Qt.Orientation.Horizontal)
         self.slider_pitch.setRange(-10, 10)
         self.slider_pitch.setValue(1)
-        self.lbl_pitch_val = QLabel("+1", self)
+        self.lbl_pitch_val = QLabel("+1")
         self.slider_pitch.valueChanged.connect(self._on_pitch_changed)
         pitch_row = QHBoxLayout()
         pitch_row.addWidget(self.slider_pitch)
         pitch_row.addWidget(self.lbl_pitch_val)
         style_grid.addLayout(pitch_row, 3, 1)
-
+ 
         # Custom Energy
-        style_grid.addWidget(QLabel("Custom Energy:", self), 4, 0)
-        self.slider_energy = QSlider(Qt.Orientation.Horizontal, self)
+        style_grid.addWidget(QLabel("Custom Energy:"), 4, 0)
+        self.slider_energy = QSlider(Qt.Orientation.Horizontal)
         self.slider_energy.setRange(50, 200)
         self.slider_energy.setValue(120)
-        self.lbl_energy_val = QLabel("1.20x", self)
+        self.lbl_energy_val = QLabel("1.20x")
         self.slider_energy.valueChanged.connect(self._on_energy_changed)
         energy_row = QHBoxLayout()
         energy_row.addWidget(self.slider_energy)
         energy_row.addWidget(self.lbl_energy_val)
         style_grid.addLayout(energy_row, 4, 1)
-
+ 
         # Initialize sliders disabled by default unless custom is picked
         self.slider_speed.setEnabled(False)
         self.slider_pitch.setEnabled(False)
         self.slider_energy.setEnabled(False)
         self.combo_tone.setEnabled(False)
-
+ 
         left_layout.addWidget(style_group)
-
+ 
         # Group 3: Cloning Options (Tabs)
-        cloning_group = QGroupBox("3. Voice Target / Cloning Source", self)
+        cloning_group = QGroupBox("3. Voice Target / Cloning Source")
         cloning_layout = QVBoxLayout(cloning_group)
         
-        self.cloning_tabs = QTabWidget(self)
+        self.cloning_tabs = QTabWidget()
         
         # Tab A: Preset Library
-        tab_preset = QWidget(self)
+        tab_preset = QWidget()
         preset_layout = QVBoxLayout(tab_preset)
-        self.combo_voice_preset = QComboBox(self)
+        self.combo_voice_preset = QComboBox()
         self.combo_voice_preset.addItems([
             "Default Male (American Accent)",
             "Default Female (American Accent)",
             "Professional Male (British Accent)",
             "Warm Female (Australian Accent)"
         ])
-        preset_layout.addWidget(QLabel("Choose high-quality default voice profile:", self))
+        preset_layout.addWidget(QLabel("Choose high-quality default voice profile:"))
         preset_layout.addWidget(self.combo_voice_preset)
         preset_layout.addStretch()
         self.cloning_tabs.addTab(tab_preset, "Preset Library")
-
+ 
         # Tab B: Live Microphone Record
-        tab_record = QWidget(self)
+        tab_record = QWidget()
         record_layout = QVBoxLayout(tab_record)
-        self.btn_record = QPushButton("🎙 Record Voice Sample (10s)", self)
+        self.btn_record = QPushButton("🎙 Record Voice Sample (10s)")
         self.btn_record.clicked.connect(self._toggle_recording)
-        self.lbl_record_status = QLabel("Status: Idle", self)
+        self.lbl_record_status = QLabel("Status: Idle")
         self.lbl_record_status.setStyleSheet("color: #94a3b8;")
         
-        record_layout.addWidget(QLabel("Record a short voice sample using your microphone:", self))
+        record_layout.addWidget(QLabel("Record a short voice sample using your microphone:"))
         record_layout.addWidget(self.btn_record)
         record_layout.addWidget(self.lbl_record_status)
         record_layout.addStretch()
         self.cloning_tabs.addTab(tab_record, "Live Record")
-
+ 
         # Tab C: Local File Upload
-        tab_upload = QWidget(self)
+        tab_upload = QWidget()
         upload_layout = QVBoxLayout(tab_upload)
         
-        self.lbl_uploaded_file = QLabel("No reference voice file selected.", self)
-        self.btn_upload = QPushButton("📁 Upload Audio Sample (.wav / .mp3)", self)
+        self.lbl_uploaded_file = QLabel("No reference voice file selected.")
+        self.btn_upload = QPushButton("📁 Upload Audio Sample (.wav / .mp3)")
         self.btn_upload.clicked.connect(self._upload_reference_audio)
         
-        upload_layout.addWidget(QLabel("Upload a 10-30 second audio sample of the voice:", self))
+        upload_layout.addWidget(QLabel("Upload a 10-30 second audio sample of the voice:"))
         upload_layout.addWidget(self.btn_upload)
         upload_layout.addWidget(self.lbl_uploaded_file)
         upload_layout.addStretch()
         self.cloning_tabs.addTab(tab_upload, "File Upload")
-
+ 
         cloning_layout.addWidget(self.cloning_tabs)
         left_layout.addWidget(cloning_group)
         
         left_scroll.setWidget(left_panel)
         main_layout.addWidget(left_scroll, 3)
-
+ 
         # Scroll wrapper for Right Panel
         right_scroll = QScrollArea(self)
         right_scroll.setWidgetResizable(True)
         right_scroll.setFrameShape(QFrame.Shape.NoFrame)
         right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
+ 
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(15)
-
+ 
         # Group 4: Local AI Inference Install Panel (OuteTTS setup)
-        install_group = QGroupBox("Offline AI Voice Cloner (OuteTTS)", self)
+        install_group = QGroupBox("Offline AI Voice Cloner (OuteTTS)")
         install_layout = QVBoxLayout(install_group)
         
-        self.lbl_engine_status = QLabel("Engine State: Local Synthesizer Fallback Active (Zero Bloat)", self)
+        self.lbl_engine_status = QLabel("Engine State: Local Synthesizer Fallback Active (Zero Bloat)")
         self.lbl_engine_status.setStyleSheet("color: #e67e22; font-weight: bold;")
-        self.btn_install_outetts = QPushButton("⚙ Install Offline Cloner (PyTorch & OuteTTS ~1.5GB)", self)
+        self.btn_install_outetts = QPushButton("⚙ Install Offline Cloner (PyTorch & OuteTTS ~1.5GB)")
         self.btn_install_outetts.clicked.connect(self._install_cloner_models)
         
         install_layout.addWidget(self.lbl_engine_status)
         install_layout.addWidget(self.btn_install_outetts)
         right_layout.addWidget(install_group)
-
+ 
         # Group 5: Output controls & Preview Player
-        output_group = QGroupBox("Voice Output & Audio Player", self)
+        output_group = QGroupBox("Voice Output & Audio Player")
         output_layout = QVBoxLayout(output_group)
-
-        self.btn_generate = QPushButton("⚡ Generate Speech Voiceover", self)
+ 
+        self.btn_generate = QPushButton("⚡ Generate Speech Voiceover")
         self.btn_generate.setStyleSheet("background-color: #2e7d32; border: 1px solid #4caf50; font-weight: bold; font-size: 14px;")
         self.btn_generate.clicked.connect(self._generate_speech)
         output_layout.addWidget(self.btn_generate)
-
-        self.progress_bar = QProgressBar(self)
+ 
+        self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         output_layout.addWidget(self.progress_bar)
-
-        self.lbl_output_path = QLabel("Output Audio: Not generated yet", self)
+ 
+        self.lbl_output_path = QLabel("Output Audio: Not generated yet")
         self.lbl_output_path.setWordWrap(True)
         output_layout.addWidget(self.lbl_output_path)
-
+ 
         # Visual Audio Player controls
         player_layout = QHBoxLayout()
-        self.btn_play_preview = QPushButton("▶ Play", self)
+        self.btn_play_preview = QPushButton("▶ Play")
         self.btn_play_preview.setEnabled(False)
         self.btn_play_preview.clicked.connect(self._play_preview)
         player_layout.addWidget(self.btn_play_preview)
-
-        self.slider_progress = QSlider(Qt.Orientation.Horizontal, self)
+ 
+        self.slider_progress = QSlider(Qt.Orientation.Horizontal)
         self.slider_progress.setEnabled(False)
         player_layout.addWidget(self.slider_progress)
         
         output_layout.addLayout(player_layout)
         right_layout.addWidget(output_group)
-
+ 
         # Log monitor output
-        log_group = QGroupBox("TTS Process Logs", self)
+        log_group = QGroupBox("TTS Process Logs")
         log_layout = QVBoxLayout(log_group)
-        self.log_box = QPlainTextEdit(self)
+        self.log_box = QPlainTextEdit()
         self.log_box.setReadOnly(True)
         self.log_box.setPlaceholderText("Engine output history logs appear here...")
         log_layout.addWidget(self.log_box)
         right_layout.addWidget(log_group)
-
+ 
         right_scroll.setWidget(right_panel)
         main_layout.addWidget(right_scroll, 2)
 
@@ -514,75 +514,86 @@ class GMapsScraperWidget(QWidget):
 
     def _build_ui(self):
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(20)
-
-        # Left Column: Inputs & Commands
-        left_panel = QWidget(self)
+ 
+        # Scroll wrapper for Left Panel
+        left_scroll = QScrollArea(self)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+ 
+        left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(15)
-
-        form_group = QGroupBox("Google Maps Search Configuration", self)
+ 
+        form_group = QGroupBox("Google Maps Search Configuration")
         grid = QGridLayout(form_group)
         
-        grid.addWidget(QLabel("Leads Niche/Category:", self), 0, 0)
-        self.edit_niche = QLineEdit(self)
+        grid.addWidget(QLabel("Leads Niche/Category:"), 0, 0)
+        self.edit_niche = QLineEdit()
         self.edit_niche.setText("Towing Services")
         grid.addWidget(self.edit_niche, 0, 1)
-
-        grid.addWidget(QLabel("Location / City:", self), 1, 0)
-        self.edit_loc = QLineEdit(self)
+ 
+        grid.addWidget(QLabel("Location / City:"), 1, 0)
+        self.edit_loc = QLineEdit()
         self.edit_loc.setText("Miami, FL")
         grid.addWidget(self.edit_loc, 1, 1)
-
-        grid.addWidget(QLabel("Max Leads count:", self), 2, 0)
-        self.combo_max = QComboBox(self)
+ 
+        grid.addWidget(QLabel("Max Leads count:"), 2, 0)
+        self.combo_max = QComboBox()
         self.combo_max.addItems(["10", "20", "50", "100"])
         grid.addWidget(self.combo_max, 2, 1)
-
+ 
         left_layout.addWidget(form_group)
-
+ 
         # Scrape commands
-        self.btn_scrape = QPushButton("🔍 Start Google Maps Scrape", self)
+        self.btn_scrape = QPushButton("🔍 Start Google Maps Scrape")
         self.btn_scrape.setStyleSheet("background-color: #2e7d32; font-weight: bold;")
         self.btn_scrape.clicked.connect(self._start_scraping)
         left_layout.addWidget(self.btn_scrape)
-
-        self.btn_stop = QPushButton("■ Cancel Scrape", self)
+ 
+        self.btn_stop = QPushButton("■ Cancel Scrape")
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self._cancel_scraping)
         left_layout.addWidget(self.btn_stop)
-
+ 
         # Export group
-        export_group = QGroupBox("Campaign Push Operations", self)
+        export_group = QGroupBox("Campaign Push Operations")
         export_layout = QVBoxLayout(export_group)
         
-        self.btn_push_sms = QPushButton("💬 Push to SMS Campaign", self)
+        self.btn_push_sms = QPushButton("💬 Push to SMS Campaign")
         self.btn_push_sms.setEnabled(False)
         self.btn_push_sms.clicked.connect(lambda: self._push_to_campaign("sms"))
         export_layout.addWidget(self.btn_push_sms)
-
-        self.btn_push_wa = QPushButton("🟢 Push to WhatsApp Campaign", self)
+ 
+        self.btn_push_wa = QPushButton("🟢 Push to WhatsApp Campaign")
         self.btn_push_wa.setEnabled(False)
         self.btn_push_wa.clicked.connect(lambda: self._push_to_campaign("whatsapp"))
         export_layout.addWidget(self.btn_push_wa)
-
+ 
         left_layout.addWidget(export_group)
         left_layout.addStretch()
-
-        main_layout.addWidget(left_panel, 1)
-
-        # Right Column: Output Leads Table & Log console
-        right_panel = QWidget(self)
+ 
+        left_scroll.setWidget(left_panel)
+        main_layout.addWidget(left_scroll, 1)
+ 
+        # Scroll wrapper for Right Panel
+        right_scroll = QScrollArea(self)
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+ 
+        right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(15)
-
-        table_group = QGroupBox("Scraped Google Maps Lead Lists", self)
+ 
+        table_group = QGroupBox("Scraped Google Maps Lead Lists")
         table_layout = QVBoxLayout(table_group)
         
-        self.table = QTableWidget(self)
+        self.table = QTableWidget()
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(["Business Name", "Phone Number", "Website", "Rating", "Address"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -591,17 +602,18 @@ class GMapsScraperWidget(QWidget):
         table_layout.addWidget(self.table)
         
         right_layout.addWidget(table_group, 3)
-
+ 
         # Progress log
-        log_group = QGroupBox("Live Scraper Connection Output Logs", self)
+        log_group = QGroupBox("Live Scraper Connection Output Logs")
         log_layout = QVBoxLayout(log_group)
-        self.log_monitor = QPlainTextEdit(self)
+        self.log_monitor = QPlainTextEdit()
         self.log_monitor.setReadOnly(True)
         log_layout.addWidget(self.log_monitor)
         
         right_layout.addWidget(log_group, 1)
-
-        main_layout.addWidget(right_panel, 2)
+ 
+        right_scroll.setWidget(right_panel)
+        main_layout.addWidget(right_scroll, 2)
 
     def _start_scraping(self):
         niche = self.edit_niche.text().strip()
@@ -765,100 +777,124 @@ class ScriptToVideoAgentWidget(QWidget):
 
     def _build_ui(self):
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(20)
-
+ 
         # Scroll wrapper for Left Panel
         left_scroll = QScrollArea(self)
         left_scroll.setWidgetResizable(True)
         left_scroll.setFrameShape(QFrame.Shape.NoFrame)
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
+ 
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(15)
-
-        form_group = QGroupBox("1. Video Blueprint Prompt Setup", self)
+ 
+        form_group = QGroupBox("1. Video Blueprint Prompt Setup")
         grid = QGridLayout(form_group)
         
-        grid.addWidget(QLabel("Video Subject / Topic:", self), 0, 0)
-        self.edit_prompt = QPlainTextEdit(self)
+        grid.addWidget(QLabel("Video Subject / Topic:"), 0, 0)
+        self.edit_prompt = QPlainTextEdit()
         self.edit_prompt.setPlaceholderText("Write the general concept (e.g. 'History of the Roman Empire in amber tones' or 'Top 3 bedtime hacks for parents')...")
         self.edit_prompt.setPlainText("The legend of the ancient tortoise who knew the night's secrets. Bedtime style.")
         grid.addWidget(self.edit_prompt, 0, 1, 1, 3)
-
-        grid.addWidget(QLabel("Visual Model:", self), 1, 0)
-        self.combo_visual_model = QComboBox(self)
+ 
+        grid.addWidget(QLabel("Visual Model:"), 1, 0)
+        self.combo_visual_model = QComboBox()
         self.combo_visual_model.addItems(["Dola (SeaDance 2.0)", "SnapGen (Google Veo 3)", "LTX-Video (Local)", "WAN 2.1 (Local)"])
         grid.addWidget(self.combo_visual_model, 1, 1)
-
-        self.chk_native_audio = QCheckBox("Use Native Model Audio", self)
+ 
+        self.chk_native_audio = QCheckBox("Use Native Model Audio")
         self.chk_native_audio.setChecked(True)
         grid.addWidget(self.chk_native_audio, 1, 2)
-
-        self.chk_separate_voice = QCheckBox("Generate Voiceover Separately", self)
+ 
+        self.chk_separate_voice = QCheckBox("Generate Voiceover Separately")
         self.chk_separate_voice.setChecked(False)
         grid.addWidget(self.chk_separate_voice, 1, 3)
-
+ 
         left_layout.addWidget(form_group)
-
+ 
         # Step 2: Storyboard editor
-        edit_group = QGroupBox("2. Script & Storyboard Outline Editor", self)
+        edit_group = QGroupBox("2. Script & Storyboard Outline Editor")
         edit_layout = QVBoxLayout(edit_group)
-        self.script_editor = QPlainTextEdit(self)
+        self.script_editor = QPlainTextEdit()
         self.script_editor.setPlaceholderText("The generated storyboard script outline will populate here. Review and edit before video production...")
+        self.script_editor.textChanged.connect(self._on_script_text_changed)
         edit_layout.addWidget(self.script_editor)
         left_layout.addWidget(edit_group)
-
-        # Trigger button
-        self.btn_brainstorm = QPushButton("🧠 Step 1: Brainstorm Storyboard", self)
+ 
+        # Trigger buttons layout
+        btn_row_layout = QHBoxLayout()
+        self.btn_brainstorm = QPushButton("🧠 Step 1: Brainstorm Storyboard")
         self.btn_brainstorm.clicked.connect(self._brainstorm_script)
-        left_layout.addWidget(self.btn_brainstorm)
-
-        self.btn_assemble = QPushButton("🎬 Step 2: Approve & Assemble Video", self)
+        btn_row_layout.addWidget(self.btn_brainstorm)
+ 
+        self.btn_assemble = QPushButton("🎬 Step 2: Approve & Assemble Video")
         self.btn_assemble.setStyleSheet("background-color: #2e7d32; font-weight: bold;")
         self.btn_assemble.setEnabled(False)
         self.btn_assemble.clicked.connect(self._assemble_video)
-        left_layout.addWidget(self.btn_assemble)
+        btn_row_layout.addWidget(self.btn_assemble)
+        left_layout.addLayout(btn_row_layout)
 
+        # Primary Submit / Start Request Button
+        self.btn_submit_request = QPushButton("🚀 Start Request / Submit Video Generation")
+        self.btn_submit_request.setObjectName("primary")
+        self.btn_submit_request.setStyleSheet("background-color: #3498db; color: #fff; font-weight: bold; font-size: 13px; padding: 12px;")
+        self.btn_submit_request.clicked.connect(self._on_submit_request_clicked)
+        left_layout.addWidget(self.btn_submit_request)
+
+        # Unified Help Buttons Row
+        help_row = QHBoxLayout()
+        self.btn_instructions = QPushButton("Instructions")
+        self.btn_instructions.clicked.connect(lambda: self.window()._show_tool_popup_guide(15))
+        self.btn_issues = QPushButton("Issues/Fixes")
+        self.btn_issues.clicked.connect(lambda: self.window()._show_issues_dialog() if hasattr(self.window(), '_show_issues_dialog') else None)
+        self.btn_upgrade = QPushButton("Upgrade your plan")
+        self.btn_upgrade.setObjectName("primary")
+        self.btn_upgrade.clicked.connect(lambda: self.window()._open_premium_whatsapp() if hasattr(self.window(), '_open_premium_whatsapp') else None)
+        help_row.addWidget(self.btn_instructions)
+        help_row.addWidget(self.btn_issues)
+        help_row.addWidget(self.btn_upgrade)
+        left_layout.addLayout(help_row)
+ 
         left_scroll.setWidget(left_panel)
         main_layout.addWidget(left_scroll, 3)
-
+ 
         # Scroll wrapper for Right Panel
         right_scroll = QScrollArea(self)
         right_scroll.setWidgetResizable(True)
         right_scroll.setFrameShape(QFrame.Shape.NoFrame)
         right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
+ 
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(15)
-
-        progress_group = QGroupBox("Assembly Pipeline Logs", self)
+ 
+        progress_group = QGroupBox("Assembly Pipeline Logs")
         progress_layout = QVBoxLayout(progress_group)
         
-        self.progress_bar = QProgressBar(self)
+        self.progress_bar = QProgressBar()
         progress_layout.addWidget(self.progress_bar)
-
-        self.log_screen = QPlainTextEdit(self)
+ 
+        self.log_screen = QPlainTextEdit()
         self.log_screen.setReadOnly(True)
         self.log_screen.setPlaceholderText("AI Agent processing status reports...")
         progress_layout.addWidget(self.log_screen)
         
         right_layout.addWidget(progress_group, 2)
-
+ 
         # Output preview
-        output_group = QGroupBox("Final Video Output Render", self)
+        output_group = QGroupBox("Final Video Output Render")
         output_layout = QVBoxLayout(output_group)
         
-        self.lbl_output_state = QLabel("No video synthesized yet.", self)
+        self.lbl_output_state = QLabel("No video synthesized yet.")
         self.lbl_output_state.setWordWrap(True)
         output_layout.addWidget(self.lbl_output_state)
         
         right_layout.addWidget(output_group, 1)
-
+ 
         right_scroll.setWidget(right_panel)
         main_layout.addWidget(right_scroll, 2)
 
@@ -947,8 +983,78 @@ class ScriptToVideoAgentWidget(QWidget):
 
     def _step_merge_complete(self):
         self.btn_assemble.setEnabled(True)
+        self.btn_brainstorm.setEnabled(True)
+        self.btn_submit_request.setEnabled(True)
         self.progress_bar.setValue(100)
         output_file = Path.home() / 'Documents' / 'dola_downloads' / 'Ancient_Tortoise_Bedtime_Story.mp4'
         self.lbl_output_state.setText(f"Synthesis Complete: {output_file.name}")
         self.log_screen.appendPlainText(f"[Agent] Merged video generated successfully: {output_file}")
         QMessageBox.information(self, "Generation Success", f"Video successfully synthesized: {output_file.name}")
+
+    def _on_script_text_changed(self):
+        text = self.script_editor.toPlainText().strip()
+        self.btn_assemble.setEnabled(bool(text))
+
+    def _on_submit_request_clicked(self):
+        prompt = self.edit_prompt.toPlainText().strip()
+        if not prompt:
+            QMessageBox.warning(self, "No Prompt", "Please enter a video topic prompt.")
+            return
+
+        self.log_screen.appendPlainText("[Agent] Starting video agent request...")
+        self.btn_submit_request.setEnabled(False)
+        self.btn_brainstorm.setEnabled(False)
+        self.btn_assemble.setEnabled(False)
+
+        current_script = self.script_editor.toPlainText().strip()
+        # If empty or default placeholder value, brainstorm first
+        if not current_script or current_script.startswith("The generated storyboard script outline will populate here"):
+            self.log_screen.appendPlainText("[Agent] Step 1: Brainstorming script outline...")
+            self.progress_bar.setValue(10)
+
+            def run_api_query():
+                simulated_script = (
+                    "SCENE 1:\n"
+                    "Visual: A giant ancient tortoise slowly walking on a grassy hill under a golden sunset.\n"
+                    "Narration: Long ago, on a quiet hill, lived a tortoise who had seen a thousand nights.\n\n"
+                    "SCENE 2:\n"
+                    "Visual: Bedside lamp illuminating a kids room, starry sky outside window.\n"
+                    "Narration: Each night, he would tell the forest animals stories that brought deep, peaceful rest.\n\n"
+                    "SCENE 3:\n"
+                    "Visual: Golden Lamplight bedside lamp, parent soft whispering to toddler.\n"
+                    "Narration: And now, that same ancient tortoise has a message for you: sleep is sweet, and you are safe."
+                )
+                try:
+                    url = "http://localhost:7000/api/chat"
+                    payload = {
+                        "model": "llama3",
+                        "messages": [
+                            {"role": "system", "content": "You are a professional storyboard writer. Output a video script divided into scenes. For each scene, specify 'Visual: [description]' and 'Narration: [voiceover script]'. Keep it clean and follow format."},
+                            {"role": "user", "content": f"Create a 3-scene storyboard for a video about: {prompt}"}
+                        ],
+                        "stream": False
+                    }
+                    response = requests.post(url, json=payload, timeout=8)
+                    if response.status_code == 200:
+                        data = response.json()
+                        storyboard = data.get("message", {}).get("content", "").strip()
+                        if storyboard:
+                            return storyboard
+                except Exception as e:
+                    logger.info(f"Odysseus API connection fallback to default: {e}")
+                return simulated_script
+
+            def thread_target():
+                result = run_api_query()
+                QTimer.singleShot(0, lambda: self._on_script_brainstormed_for_auto_run(result))
+
+            threading.Thread(target=thread_target, daemon=True).start()
+        else:
+            self.log_screen.appendPlainText("[Agent] Preset script outline detected. Assembling video...")
+            self._step_generate_voiceover()
+
+    def _on_script_brainstormed_for_auto_run(self, result):
+        self.script_editor.setPlainText(result)
+        self.log_screen.appendPlainText("[Agent] Storyboard brainstormed. Launching assembly...")
+        self.progress_bar.setValue(40)
+        self._step_generate_voiceover()

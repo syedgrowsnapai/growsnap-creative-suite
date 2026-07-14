@@ -451,7 +451,7 @@ class MainWindow(QMainWindow):
         else:
             self.setWindowTitle("GrowSnap One")
             
-        self.resize(1300, 850)
+        self.resize(1280, 680)
         
         # Set window icon
         icon_path = get_resource_path("resources/icon.png")
@@ -694,7 +694,6 @@ class MainWindow(QMainWindow):
         self.btn_nav_gmaps_scraper = QPushButton("GMaps Leads Scraper", self)
         self.btn_nav_gmaps_scraper.setCheckable(True)
         self.btn_nav_gmaps_scraper.setObjectName("sub_nav_button")
-
         panel_reach_layout.addWidget(self.btn_nav_sms)
         panel_reach_layout.addWidget(self.btn_nav_whatsapp)
         panel_reach_layout.addWidget(self.btn_nav_telephony)
@@ -707,12 +706,18 @@ class MainWindow(QMainWindow):
         # 2. Right Content Panel
         right_panel = QWidget(self)
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(20, 20, 20, 20)
-        right_layout.setSpacing(15)
+        right_layout.setContentsMargins(20, 5, 20, 15)
+        right_layout.setSpacing(10)
 
         # Header Row
         header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(10)
+
         title_box = QVBoxLayout()
+        title_box.setContentsMargins(0, 0, 0, 0)
+        title_box.setSpacing(0)
+
         self.title_lbl = GradientLabel("AI Platform Automator", self)
         self.title_lbl.setObjectName("title")
         title_box.addWidget(self.title_lbl)
@@ -798,6 +803,7 @@ class MainWindow(QMainWindow):
         # Timer Card
         timer_card = QFrame(self)
         timer_card.setObjectName("stat_card")
+        timer_card.setFixedHeight(80)
         timer_card_layout = QVBoxLayout(timer_card)
         timer_label_lbl = QLabel("ELAPSED TIME", timer_card)
         timer_label_lbl.setObjectName("statLabel")
@@ -1629,6 +1635,7 @@ class MainWindow(QMainWindow):
     def _stat_card(self, label_text: str, default_val: str) -> QFrame:
         card = QFrame(self)
         card.setObjectName("stat_card")
+        card.setFixedHeight(80)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(10, 10, 10, 10)
         
