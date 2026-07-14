@@ -193,15 +193,15 @@ class SnapGenAutomationWidget(QWidget):
         left_layout.setSpacing(15)
         
         # 1. Mode Selection
-        mode_group = QGroupBox("GENERATION MODE", self)
+        mode_group = QGroupBox("GENERATION MODE")
         mode_lay = QHBoxLayout(mode_group)
         
-        self.btn_mode_video = QPushButton("🎬 Generate Video", self)
+        self.btn_mode_video = QPushButton("🎬 Generate Video")
         self.btn_mode_video.setCheckable(True)
         self.btn_mode_video.setChecked(True)
         self.btn_mode_video.clicked.connect(self._select_video_mode)
         
-        self.btn_mode_image = QPushButton("🖼️ Generate Image", self)
+        self.btn_mode_image = QPushButton("🖼️ Generate Image")
         self.btn_mode_image.setCheckable(True)
         self.btn_mode_image.clicked.connect(self._select_image_mode)
         
@@ -215,62 +215,62 @@ class SnapGenAutomationWidget(QWidget):
         left_layout.addWidget(mode_group)
         
         # 2. Prompt Ingestion Card (Dola-aligned)
-        ingest_group = QGroupBox("PROMPT INGESTION", self)
+        ingest_group = QGroupBox("PROMPT INGESTION")
         ingest_lay = QVBoxLayout(ingest_group)
-        self.prompt_editor = QPlainTextEdit(self)
+        self.prompt_editor = QPlainTextEdit()
         self.prompt_editor.setPlaceholderText("Enter video/image generation prompts here...")
         ingest_lay.addWidget(self.prompt_editor)
         
         path_row = QHBoxLayout()
-        self.edit_path = QLineEdit(self)
+        self.edit_path = QLineEdit()
         self.edit_path.setPlaceholderText("Paste CSV/TXT file path here...")
-        self.btn_load_path = QPushButton("Load Path", self)
+        self.btn_load_path = QPushButton("Load Path")
         self.btn_load_path.clicked.connect(self._load_prompt_from_path)
         path_row.addWidget(self.edit_path)
         path_row.addWidget(self.btn_load_path)
         ingest_lay.addLayout(path_row)
         
         btn_row = QHBoxLayout()
-        self.btn_load_file = QPushButton("Load CSV/TXT", self)
+        self.btn_load_file = QPushButton("Load CSV/TXT")
         self.btn_load_file.clicked.connect(self._load_prompt_file)
-        self.btn_parse = QPushButton("Parse prompts", self)
+        self.btn_parse = QPushButton("Parse prompts")
         self.btn_parse.clicked.connect(self._parse_prompts)
         btn_row.addWidget(self.btn_load_file)
         btn_row.addWidget(self.btn_parse)
         ingest_lay.addLayout(btn_row)
         left_layout.addWidget(ingest_group)
-
+ 
         # 3. Reference Image Picker
-        ref_group = QGroupBox("REFERENCE IMAGES", self)
+        ref_group = QGroupBox("REFERENCE IMAGES")
         ref_layout = QVBoxLayout(ref_group)
-        self.ref_list = QListWidget(self)
+        self.ref_list = QListWidget()
         self.ref_list.setMaximumHeight(100)
         ref_layout.addWidget(self.ref_list)
-
+ 
         ref_btns = QHBoxLayout()
-        self.btn_ref_files = QPushButton("Pick images", self)
+        self.btn_ref_files = QPushButton("Pick images")
         self.btn_ref_files.clicked.connect(self._pick_reference_files)
-        self.btn_ref_folder = QPushButton("Pick folder", self)
+        self.btn_ref_folder = QPushButton("Pick folder")
         self.btn_ref_folder.clicked.connect(self._pick_reference_folder)
-        self.btn_clear_refs = QPushButton("Clear", self)
+        self.btn_clear_refs = QPushButton("Clear")
         self.btn_clear_refs.clicked.connect(self._clear_references)
         ref_btns.addWidget(self.btn_ref_files)
         ref_btns.addWidget(self.btn_ref_folder)
         ref_btns.addWidget(self.btn_clear_refs)
         ref_layout.addLayout(ref_btns)
         left_layout.addWidget(ref_group)
-
+ 
         # 4. Operational Buttons
         btn_lay = QHBoxLayout()
-        self.btn_start = QPushButton("Start batch", self)
+        self.btn_start = QPushButton("Start batch")
         self.btn_start.setObjectName("primary")
         self.btn_start.clicked.connect(self._start_batch)
         
-        self.btn_pause = QPushButton("Pause", self)
+        self.btn_pause = QPushButton("Pause")
         self.btn_pause.clicked.connect(self._pause_batch)
         self.btn_pause.setEnabled(False)
         
-        self.btn_stop = QPushButton("Stop", self)
+        self.btn_stop = QPushButton("Stop")
         self.btn_stop.setObjectName("danger")
         self.btn_stop.clicked.connect(self._stop_batch)
         self.btn_stop.setEnabled(False)
@@ -279,14 +279,14 @@ class SnapGenAutomationWidget(QWidget):
         btn_lay.addWidget(self.btn_pause)
         btn_lay.addWidget(self.btn_stop)
         left_layout.addLayout(btn_lay)
-
+ 
         # 5. Help Row Buttons
         help_row = QHBoxLayout()
-        self.btn_instructions = QPushButton("Instructions", self)
+        self.btn_instructions = QPushButton("Instructions")
         self.btn_instructions.clicked.connect(lambda: self.window()._show_tool_popup_guide(16))
-        self.btn_issues = QPushButton("Issues/Fixes", self)
+        self.btn_issues = QPushButton("Issues/Fixes")
         self.btn_issues.clicked.connect(lambda: self.window()._show_issues_dialog() if hasattr(self.window(), '_show_issues_dialog') else None)
-        self.btn_upgrade = QPushButton("Upgrade your plan", self)
+        self.btn_upgrade = QPushButton("Upgrade your plan")
         self.btn_upgrade.setObjectName("primary")
         self.btn_upgrade.clicked.connect(lambda: self.window()._open_premium_whatsapp() if hasattr(self.window(), '_open_premium_whatsapp') else None)
         help_row.addWidget(self.btn_instructions)
@@ -651,18 +651,23 @@ class SnapGenAutomationWidget(QWidget):
     def _toggle_select_all(self):
         if self.table.rowCount() == 0:
             return
-        selected = self.table.selectedItems()
-        if len(selected) > 0:
-            self.table.clearSelection()
-        else:
-            self.table.selectAll()
+        first_item = self.table.item(0, 0)
+        if not first_item:
+            return
+        new_state = Qt.CheckState.Checked if first_item.checkState() == Qt.CheckState.Unchecked else Qt.CheckState.Unchecked
+        self.table.blockSignals(True)
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 0)
+            if item:
+                item.setCheckState(new_state)
+        self.table.blockSignals(False)
 
     def _download_selected_jobs(self):
         selected_rows = list(set(index.row() for index in self.table.selectedIndexes()))
         if not selected_rows:
             QMessageBox.information(self, "Selection Required", "Please select one or more jobs in the table first.")
             return
-        QMessageBox.information(self, "Downloading", f"Downloading completed output clips for {len(selected_rows)} selected rows...")
+        self._context_download_selected()
 
     def _retry_all_failed_jobs(self):
         retried = 0
@@ -678,21 +683,218 @@ class SnapGenAutomationWidget(QWidget):
             QMessageBox.information(self, "No Failed Jobs", "There are no FAILED jobs in the current batch queue.")
 
     def _toggle_job_action(self, row, job):
-        QMessageBox.information(self, "Job Action", f"Action requested for Row #{row + 1}: {job.prompt[:30]}...")
+        self._relaunch_failed_job(job.index)
 
-    def _on_table_context_menu(self, pos):
-        item = self.table.itemAt(pos)
+    def _relaunch_failed_job(self, job_index: int):
+        if 0 <= job_index - 1 < len(self.jobs):
+            job = self.jobs[job_index-1]
+            job.status = JobStatus.PENDING
+            job.error = None
+            self.txt_log.appendPlainText(f"[Info] Relaunching Job #{job_index}...")
+            self._refresh_table()
+
+    def _on_table_item_changed(self, item):
         if not item:
             return
         row = item.row()
+        col = item.column()
+        if not (0 <= row < len(self.jobs)):
+            return
+        
+        job = self.jobs[row]
+        
+        # Guard active jobs from status and download path edits
+        if col in (5, 6) and job.status in [JobStatus.RUNNING, JobStatus.WAITING, JobStatus.DOWNLOADING]:
+            current_text = item.text().strip().upper()
+            expected_text = job.status.value.upper() if col == 5 else (job.download_path or "-")
+            if current_text == expected_text.upper():
+                return
+                
+            self.table.blockSignals(True)
+            try:
+                if col == 5:
+                    item.setText(job.status.value.upper())
+                elif col == 6:
+                    item.setText(job.download_path or "-")
+            finally:
+                self.table.blockSignals(False)
+            QTimer.singleShot(0, lambda: QMessageBox.warning(
+                self,
+                "Job Running",
+                "You cannot modify the status or download path of an active running/waiting/downloading job."
+            ))
+            return
+            
+        if col == 3:  # Prompt column
+            new_prompt = item.text().strip()
+            if not new_prompt:
+                self.table.blockSignals(True)
+                item.setText(job.prompt)
+                self.table.blockSignals(False)
+                return
+            if job.prompt != new_prompt:
+                job.prompt = new_prompt
+                self.txt_log.appendPlainText(f"[Info] Updated prompt for Job #{job.index}.")
+        elif col == 5:  # Status column
+            new_status_str = item.text().strip().lower()
+            valid_status = None
+            for status in JobStatus:
+                if status.value == new_status_str:
+                    valid_status = status
+                    break
+            if valid_status:
+                if job.status != valid_status:
+                    job.status = valid_status
+                    self._refresh_table()
+                    self._update_stats()
+            else:
+                self.table.blockSignals(True)
+                item.setText(job.status.value.upper())
+                self.table.blockSignals(False)
+        elif col == 6:  # Download Path column
+            new_path = item.text().strip()
+            job.download_path = new_path
+
+    def _on_table_context_menu(self, pos):
+        clicked_index = self.table.indexAt(pos)
+        clicked_row = clicked_index.row()
+        clicked_col = clicked_index.column()
+        
         menu = QMenu(self)
-        copy_action = menu.addAction("Copy Prompt")
-        action = menu.exec(self.table.viewport().mapToGlobal(pos))
-        if action == copy_action:
-            prompt_text = self.table.item(row, 3).text()
-            QApplication.clipboard().setText(prompt_text)
+        selected_rows = list(set(idx.row() for idx in self.table.selectedIndexes()))
+        if clicked_row >= 0 and clicked_row not in selected_rows:
+            selected_rows.append(clicked_row)
+            
+        actions = []
+        
+        # 1. Clipboard Copy Operations
+        if clicked_row >= 0 and clicked_col >= 0:
+            item = self.table.item(clicked_row, clicked_col)
+            if item:
+                cell_text = item.text()
+                copy_cell_action = menu.addAction("Copy Cell Content")
+                copy_cell_action.triggered.connect(lambda *args, text=cell_text: QApplication.clipboard().setText(text))
+                actions.append(copy_cell_action)
+                
+        if clicked_row >= 0 and 0 <= clicked_row < len(self.jobs):
+            job = self.jobs[clicked_row]
+            if getattr(job, 'download_path', None):
+                copy_path_action = menu.addAction("Copy Download Path")
+                copy_path_action.triggered.connect(lambda *args, p=job.download_path: QApplication.clipboard().setText(p))
+                actions.append(copy_path_action)
+            menu.addSeparator()
+            
+        # 2. Selection Modification
+        toggle_check_action = menu.addAction("Toggle Checkbox for Selected Rows")
+        toggle_check_action.triggered.connect(self._context_toggle_checks)
+        actions.append(toggle_check_action)
+        
+        menu.addSeparator()
+        
+        # 3. Status Override Submenu
+        if selected_rows:
+            status_menu = menu.addMenu("Change Status...")
+            for status in JobStatus:
+                status_action = status_menu.addAction(status.value.upper())
+                status_action.triggered.connect(
+                    lambda checked, rows=list(selected_rows), s=status: self._context_change_status(rows, s)
+                )
+                actions.append(status_action)
+            menu.addSeparator()
+            
+        relaunch_action = menu.addAction("Relaunch Selected Rows (Manual Browser)")
+        relaunch_action.triggered.connect(self._context_relaunch_manual)
+        actions.append(relaunch_action)
+        
+        download_action = menu.addAction("Download Selected Rows")
+        download_action.triggered.connect(self._context_download_selected)
+        actions.append(download_action)
+        
+        menu.addSeparator()
+        
+        if selected_rows:
+            set_path_action = menu.addAction("Set Download Path...")
+            set_path_action.triggered.connect(
+                lambda checked, rows=list(selected_rows): self._context_set_download_path(rows)
+            )
+            actions.append(set_path_action)
+            menu.addSeparator()
+            
+        remove_action = menu.addAction("Clear from List")
+        remove_action.triggered.connect(self._context_clear_rows)
+        actions.append(remove_action)
+        
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _context_toggle_checks(self):
+        selected_rows = list(set(idx.row() for idx in self.table.selectedIndexes()))
+        if not selected_rows:
+            return
+        first_item = self.table.item(selected_rows[0], 0)
+        if not first_item:
+            return
+        new_state = Qt.CheckState.Checked if first_item.checkState() == Qt.CheckState.Unchecked else Qt.CheckState.Unchecked
+        self.table.blockSignals(True)
+        for r in selected_rows:
+            item = self.table.item(r, 0)
+            if item:
+                item.setCheckState(new_state)
+        self.table.blockSignals(False)
+
+    def _context_change_status(self, rows, status: JobStatus):
+        allowed_rows = []
+        active_skipped = False
+        for r in rows:
+            if 0 <= r < len(self.jobs):
+                job = self.jobs[r]
+                if job.status in [JobStatus.RUNNING, JobStatus.WAITING, JobStatus.DOWNLOADING]:
+                    active_skipped = True
+                else:
+                    allowed_rows.append(r)
+                    
+        if active_skipped and not allowed_rows:
+            QMessageBox.warning(self, "Action Blocked", "You cannot modify the status of active running/waiting/downloading jobs.")
+            return
+            
+        for r in allowed_rows:
+            self.jobs[r].status = status
+            if status not in [JobStatus.FAILED]:
+                self.jobs[r].error = None
+        self._refresh_table()
+        self._update_stats()
+
+    def _context_relaunch_manual(self):
+        selected_rows = list(set(idx.row() for idx in self.table.selectedIndexes()))
+        if not selected_rows:
+            return
+        for r in selected_rows:
+            if 0 <= r < len(self.jobs):
+                self._relaunch_failed_job(self.jobs[r].index)
+
+    def _context_download_selected(self):
+        selected_rows = list(set(idx.row() for idx in self.table.selectedIndexes()))
+        if not selected_rows:
+            return
+        QMessageBox.information(self, "Download", f"Downloading completed clips for {len(selected_rows)} selected rows...")
+
+    def _context_set_download_path(self, rows):
+        path = QFileDialog.getExistingDirectory(self, "Select Download Directory")
+        if path:
+            for r in rows:
+                if 0 <= r < len(self.jobs):
+                    self.jobs[r].download_path = path
+            self._refresh_table()
+
+    def _context_clear_rows(self):
+        selected_rows = sorted(list(set(idx.row() for idx in self.table.selectedIndexes())), reverse=True)
+        for r in selected_rows:
+            if 0 <= r < len(self.jobs):
+                self.jobs.pop(r)
+        self._refresh_table()
+        self._update_stats()
 
     def _refresh_table(self):
+        self.table.blockSignals(True)
         self.table.setRowCount(0)
         search_text = self.edit_search.text().strip().lower()
         filter_statuses = self.combo_filter_status.get_checked_items()
@@ -710,24 +912,72 @@ class SnapGenAutomationWidget(QWidget):
 
             row = self.table.rowCount()
             self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(str(job.index)))
-            self.table.setItem(row, 1, QTableWidgetItem(job.video_title))
-            self.table.setItem(row, 2, QTableWidgetItem(str(job.scene_index)))
-            self.table.setItem(row, 3, QTableWidgetItem(job.prompt))
-            self.table.setItem(row, 4, QTableWidgetItem(Path(job.reference_image).name if job.reference_image else "None"))
-            self.table.setItem(row, 5, QTableWidgetItem(job.status.value))
             
-            # Apply color to status
+            # Checkbox / Index
+            chk = QTableWidgetItem(f"Job #{job.index}")
+            chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            chk.setCheckState(Qt.CheckState.Unchecked)
+            self.table.setItem(row, 0, chk)
+            
+            # Video Title
+            title_item = QTableWidgetItem(job.video_title or "Standalone")
+            title_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            self.table.setItem(row, 1, title_item)
+
+            # Scene Index
+            scene_item = QTableWidgetItem(str(job.scene_index) if job.scene_index is not None else "-")
+            scene_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            self.table.setItem(row, 2, scene_item)
+
+            # Prompt (Fully editable)
+            p_item = QTableWidgetItem(job.prompt)
+            p_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 3, p_item)
+
+            # Reference
+            ref_str = Path(job.reference_image).name if job.reference_image else "None"
+            ref_item = QTableWidgetItem(ref_str)
+            ref_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            self.table.setItem(row, 4, ref_item)
+
+            # Status
+            status_item = QTableWidgetItem(job.status.value.upper())
+            status_flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+            if job.status not in [JobStatus.RUNNING, JobStatus.WAITING, JobStatus.DOWNLOADING]:
+                status_flags |= Qt.ItemFlag.ItemIsEditable
+            status_item.setFlags(status_flags)
             status_color = STATUS_COLORS.get(job.status.value.lower(), "#ffffff")
-            self.table.item(row, 5).setForeground(QColor(status_color))
+            status_item.setForeground(QColor(status_color))
+            self.table.setItem(row, 5, status_item)
             
-            self.table.setItem(row, 6, QTableWidgetItem("-"))
-            self.table.setItem(row, 7, QTableWidgetItem("-"))
+            # Download Path
+            dl_item = QTableWidgetItem(job.download_path or "-")
+            dl_flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+            if job.status not in [JobStatus.RUNNING, JobStatus.WAITING, JobStatus.DOWNLOADING]:
+                dl_flags |= Qt.ItemFlag.ItemIsEditable
+            dl_item.setFlags(dl_flags)
+            self.table.setItem(row, 6, dl_item)
             
-            # Add action button
-            btn_action = QPushButton("Action", self)
-            btn_action.clicked.connect(lambda checked, r=row, j=job: self._toggle_job_action(r, j))
-            self.table.setCellWidget(row, 8, btn_action)
+            # Error Details
+            err_item = QTableWidgetItem(getattr(job, 'error', None) or "-")
+            err_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            if getattr(job, 'error', None):
+                err_item.setForeground(QColor("#D97706"))
+            self.table.setItem(row, 7, err_item)
+            
+            # Relaunch Action Button
+            btn_cell = QWidget()
+            cell_layout = QHBoxLayout(btn_cell)
+            cell_layout.setContentsMargins(2, 2, 2, 2)
+            cell_layout.setSpacing(5)
+            
+            relaunch_btn = QPushButton("Relaunch", btn_cell)
+            relaunch_btn.setStyleSheet("padding: 2px 8px; font-size: 11px;")
+            relaunch_btn.clicked.connect(lambda checked, idx=job.index: self._relaunch_failed_job(idx))
+            cell_layout.addWidget(relaunch_btn)
+            self.table.setCellWidget(row, 8, btn_cell)
+            
+        self.table.blockSignals(False)
 
     def _update_stats(self):
         total = len(self.jobs)
