@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QProgressBar, QPlainTextEdit, QGroupBox, QGridLayout, QComboBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QFileDialog,
-    QAbstractItemView, QTabWidget, QSlider, QCheckBox
+    QAbstractItemView, QTabWidget, QSlider, QCheckBox, QScrollArea, QFrame
 )
 from PyQt6.QtMultimedia import (
     QAudioInput, QMediaRecorder, QMediaCaptureSession, QMediaPlayer, QAudioOutput
@@ -54,8 +54,13 @@ class VoiceClonerWidget(QWidget):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(20)
 
-        # Left Column: Inputs & Controls
-        left_panel = QWidget(self)
+        # Scroll wrapper for Left Panel
+        left_scroll = QScrollArea(self)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(15)
@@ -165,18 +170,18 @@ class VoiceClonerWidget(QWidget):
         # Tab B: Live Microphone Record
         tab_record = QWidget(self)
         record_layout = QVBoxLayout(tab_record)
-        
-        self.lbl_record_status = QLabel("Status: Idle", self)
-        self.btn_record = QPushButton("🎙 Record Reference Voice (10s)", self)
+        self.btn_record = QPushButton("🎙 Record Voice Sample (10s)", self)
         self.btn_record.clicked.connect(self._toggle_recording)
+        self.lbl_record_status = QLabel("Status: Idle", self)
+        self.lbl_record_status.setStyleSheet("color: #94a3b8;")
         
-        record_layout.addWidget(QLabel("Speak into your microphone to record a sample:", self))
+        record_layout.addWidget(QLabel("Record a short voice sample using your microphone:", self))
         record_layout.addWidget(self.btn_record)
         record_layout.addWidget(self.lbl_record_status)
         record_layout.addStretch()
         self.cloning_tabs.addTab(tab_record, "Live Record")
 
-        # Tab C: File Upload
+        # Tab C: Local File Upload
         tab_upload = QWidget(self)
         upload_layout = QVBoxLayout(tab_upload)
         
@@ -193,10 +198,16 @@ class VoiceClonerWidget(QWidget):
         cloning_layout.addWidget(self.cloning_tabs)
         left_layout.addWidget(cloning_group)
         
-        main_layout.addWidget(left_panel, 3)
+        left_scroll.setWidget(left_panel)
+        main_layout.addWidget(left_scroll, 3)
 
-        # Right Column: Generation, Output & Diagnostic Player
-        right_panel = QWidget(self)
+        # Scroll wrapper for Right Panel
+        right_scroll = QScrollArea(self)
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(15)
@@ -255,7 +266,8 @@ class VoiceClonerWidget(QWidget):
         log_layout.addWidget(self.log_box)
         right_layout.addWidget(log_group)
 
-        main_layout.addWidget(right_panel, 2)
+        right_scroll.setWidget(right_panel)
+        main_layout.addWidget(right_scroll, 2)
 
     def _init_audio(self):
         # Initialize media player for audio feedback
@@ -756,8 +768,13 @@ class ScriptToVideoAgentWidget(QWidget):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(20)
 
-        # Left: Prompt Form & Steps
-        left_panel = QWidget(self)
+        # Scroll wrapper for Left Panel
+        left_scroll = QScrollArea(self)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(15)
@@ -805,10 +822,16 @@ class ScriptToVideoAgentWidget(QWidget):
         self.btn_assemble.clicked.connect(self._assemble_video)
         left_layout.addWidget(self.btn_assemble)
 
-        main_layout.addWidget(left_panel, 3)
+        left_scroll.setWidget(left_panel)
+        main_layout.addWidget(left_scroll, 3)
 
-        # Right: Progress Logs & Output Preview
-        right_panel = QWidget(self)
+        # Scroll wrapper for Right Panel
+        right_scroll = QScrollArea(self)
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(15)
@@ -836,7 +859,8 @@ class ScriptToVideoAgentWidget(QWidget):
         
         right_layout.addWidget(output_group, 1)
 
-        main_layout.addWidget(right_panel, 2)
+        right_scroll.setWidget(right_panel)
+        main_layout.addWidget(right_scroll, 2)
 
     def _brainstorm_script(self):
         prompt = self.edit_prompt.toPlainText().strip()

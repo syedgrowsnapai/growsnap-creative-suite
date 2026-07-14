@@ -1596,9 +1596,8 @@ class MainWindow(QMainWindow):
             if btn:
                 btn.setChecked(True)
 
-        # Trigger tool-specific instructions popups for first-time use
-        if button_id in [16, 17, 18, 19, 20] and button_id not in self.shown_popups:
-            self.shown_popups[button_id] = True
+        # Trigger tool-specific instructions popups on switch
+        if button_id in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 13, 14, 15, 16, 17, 18, 19, 20]:
             QTimer.singleShot(100, lambda: self._show_tool_popup_guide(button_id))
 
     def _on_load_url_to_downloader(self, url: str):
@@ -3828,6 +3827,109 @@ class MainWindow(QMainWindow):
 
     def _show_tool_popup_guide(self, button_id):
         guides = {
+            0: (
+                "AI Platform Automator Guide",
+                "Configure your target accounts, channels, API settings, and manage automation campaign dispatches.\n\n"
+                "Instructions:\n"
+                "1. Connect social, email, or webhook channels.\n"
+                "2. Configure scheduling parameters.\n"
+                "3. Keep track of queue dispatches."
+            ),
+            1: (
+                "Dola Video Automation Guide",
+                "Generate high-fidelity vertical short videos automatically from text prompts using Dola SeaDance.\n\n"
+                "Instructions:\n"
+                "1. Enter your text description prompt in the editor.\n"
+                "2. Set the resolution (e.g. 1080x1920) and style preset.\n"
+                "3. Click 'Generate Video' to process it via the remote GPU engine."
+            ),
+            2: (
+                "Watermark Removal Guide",
+                "Automatically clean watermarks, logos, or overlay text from your videos.\n\n"
+                "Instructions:\n"
+                "1. Load your video file.\n"
+                "2. Define the region coordinates containing the logo/watermark.\n"
+                "3. Click 'Clean Video' to apply the inpainting blur filters."
+            ),
+            3: (
+                "Video Merger Guide",
+                "Combine multiple short clips or hooks into a single compiled sequence.\n\n"
+                "Instructions:\n"
+                "1. Add the short videos to the compile list.\n"
+                "2. Drag or select sorting to define chronological order.\n"
+                "3. Click 'Merge and Compile' to output a unified video."
+            ),
+            4: (
+                "Viral Hook Factory Guide",
+                "Analyze and slice viral hooks from downloaded public clips.\n\n"
+                "Instructions:\n"
+                "1. Enter a video link in the downloader tab to fetch locally.\n"
+                "2. Use transcript-based slicing to capture hook segments.\n"
+                "3. Save the sliced hooks to your local library."
+            ),
+            5: (
+                "Profile Outliers Analyzer Guide",
+                "Scan competitors' public profiles to detect viral outlier content.\n\n"
+                "Instructions:\n"
+                "1. Input the target creator profile handle.\n"
+                "2. Click 'Analyze Outliers' to fetch view counts and statistics.\n"
+                "3. Identify which topics received 3x-10x typical viewership."
+            ),
+            6: (
+                "Hook Library Guide",
+                "Manage and browse your saved repository of high-performing viral hooks.\n\n"
+                "Instructions:\n"
+                "1. View previously sliced hook videos and transcribed texts.\n"
+                "2. Click 'Copy Text' or export directly to the merger tab."
+            ),
+            7: (
+                "SMS Gateway (httpSMS) Guide",
+                "Dispatch cold outreach campaigns via SMS using your Android phone.\n\n"
+                "Instructions:\n"
+                "1. Input your httpSMS API key in the connection box.\n"
+                "2. Import a text/CSV file with list of lead numbers.\n"
+                "3. Click 'Send Campaign' to begin dispatching."
+            ),
+            8: (
+                "WhatsApp Automation Guide",
+                "Send automated bulk messages to targeted lead groups using WhatsApp Web.\n\n"
+                "Instructions:\n"
+                "1. Click 'Link WhatsApp Session' to launch a headed browser.\n"
+                "2. Scan the QR code using your phone to authenticate (the session will remain persistently saved!).\n"
+                "3. Load lead contacts, enter template message, and click 'Send WhatsApp Campaign'."
+            ),
+            9: (
+                "AI Voice Telephony Guide",
+                "Launch custom outbound voice calls to cold leads using interactive AI voice agents.\n\n"
+                "Instructions:\n"
+                "1. Input your Twilio and Retell AI credentials.\n"
+                "2. Choose the agent voice prompt personality.\n"
+                "3. Schedule or trigger outbound calls to phone list."
+            ),
+            13: (
+                "Voice Cloner & TTS Engine Guide",
+                "Clone any voice or generate speech voiceovers offline using AI TTS engines.\n\n"
+                "Instructions:\n"
+                "1. Input the narration script you want the voice to speak.\n"
+                "2. Pick the source voice preset, record mic, or upload WAV audio sample.\n"
+                "3. Click 'Generate Speech Voiceover' to compile natural offline voice track."
+            ),
+            14: (
+                "GMaps Leads Scraper Guide",
+                "Extract B2B lead info from Google Maps local searches.\n\n"
+                "Instructions:\n"
+                "1. Enter search queries (e.g. 'Dentists New York').\n"
+                "2. Specify limit count and click 'Start Scraping'.\n"
+                "3. Export leads with name, phone, website, and address to CSV/TXT."
+            ),
+            15: (
+                "Autonomous Script-to-Video Agent Guide",
+                "Provide a single topic prompt, and let local AI storyboard and assemble a full video automatically.\n\n"
+                "Instructions:\n"
+                "1. Type the subject topic prompt.\n"
+                "2. Click 'Step 1: Brainstorm Storyboard' to generate outline scenes using local Odysseus model.\n"
+                "3. Edit storyboard text, choose visual generator model, and click 'Step 2: Approve & Assemble Video'."
+            ),
             16: (
                 "SnapGen Video Automation Guide",
                 "Use Google Veo 3 and Nano Banana Pro/2 to generate high-fidelity 8-second clips and premium images.\n\n"

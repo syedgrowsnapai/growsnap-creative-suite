@@ -53,6 +53,7 @@ class SnapGenAutomationWidget(QWidget):
         # Subtitle
         lbl_subtitle = QLabel("SNAPGEN VIDEO AUTOMATION — powered by Google Veo 3 and Nano Banana Pro/2", self)
         lbl_subtitle.setObjectName("subtitle")
+        lbl_subtitle.setFixedHeight(20)
         layout.addWidget(lbl_subtitle)
 
         # Stats Dashboard Bar (matching Dola)
@@ -303,6 +304,7 @@ class OpenCutVideoEditorWidget(QWidget):
         # Subtitle
         lbl_subtitle = QLabel("OPENCUT VIDEO EDITOR — AI-powered and manual timeline edits", self)
         lbl_subtitle.setObjectName("subtitle")
+        lbl_subtitle.setFixedHeight(20)
         layout.addWidget(lbl_subtitle)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -445,8 +447,10 @@ class AIVideoClipperWidget(QWidget):
         layout.setSpacing(15)
 
         # Subtitle
+        # Subtitle
         lbl_subtitle = QLabel("AI VIDEO CLIPPER — split long videos into high-energy short clips", self)
         lbl_subtitle.setObjectName("subtitle")
+        lbl_subtitle.setFixedHeight(20)
         layout.addWidget(lbl_subtitle)
 
         grid = QGridLayout()
@@ -554,6 +558,7 @@ class CommunityShowcaseWidget(QWidget):
         # Subtitle
         lbl_subtitle = QLabel("COMMUNITY SHOWCASE — trending prompts feed and templates library", self)
         lbl_subtitle.setObjectName("subtitle")
+        lbl_subtitle.setFixedHeight(20)
         layout.addWidget(lbl_subtitle)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -565,6 +570,7 @@ class CommunityShowcaseWidget(QWidget):
 
         self.list_gallery = QListWidget(self)
         self.list_gallery.setSpacing(8)
+        self.list_gallery.itemClicked.connect(self._copy_prompt)
         left_lay.addWidget(self.list_gallery)
         
         # Populate gallery mock creations with descriptions and prompts
@@ -597,6 +603,7 @@ class CommunityShowcaseWidget(QWidget):
         right_lay = QVBoxLayout(right)
 
         self.list_templates = QListWidget(self)
+        self.list_templates.itemClicked.connect(self._copy_template)
         right_lay.addWidget(self.list_templates)
 
         templates = [
@@ -632,13 +639,13 @@ class CommunityShowcaseWidget(QWidget):
         help_row.addWidget(self.btn_upgrade)
         layout.addLayout(help_row)
 
-    def _copy_prompt(self):
-        curr = self.list_gallery.currentItem()
+    def _copy_prompt(self, item=None):
+        curr = item or self.list_gallery.currentItem()
         if curr:
             prompt = curr.data(Qt.ItemDataRole.UserRole)
             from PyQt6.QtWidgets import QApplication
             QApplication.clipboard().setText(prompt)
-            QMessageBox.information(self, "Copied", "Prompt copied to clipboard!")
+            QMessageBox.information(self, "Copied", f"Prompt copied to clipboard:\n\n\"{prompt}\"")
 
     def _send_to_generator(self):
         curr = self.list_gallery.currentItem()
@@ -651,13 +658,13 @@ class CommunityShowcaseWidget(QWidget):
                 main_win._on_nav_changed(1) # Switch to Dola tab
                 QMessageBox.information(self, "Sent", "Prompt sent to Dola Video Automation!")
 
-    def _copy_template(self):
-        curr = self.list_templates.currentItem()
+    def _copy_template(self, item=None):
+        curr = item or self.list_templates.currentItem()
         if curr:
             prompt = curr.data(Qt.ItemDataRole.UserRole)
             from PyQt6.QtWidgets import QApplication
             QApplication.clipboard().setText(prompt)
-            QMessageBox.information(self, "Copied", "Template copied to clipboard!")
+            QMessageBox.information(self, "Copied", f"Template copied to clipboard:\n\n\"{prompt}\"")
 
 
 class AIModelsSandboxWidget(QWidget):
@@ -673,6 +680,7 @@ class AIModelsSandboxWidget(QWidget):
         # Subtitle
         lbl_subtitle = QLabel("AI MODELS SANDBOX — offline generation link for local server configurations", self)
         lbl_subtitle.setObjectName("subtitle")
+        lbl_subtitle.setFixedHeight(20)
         layout.addWidget(lbl_subtitle)
 
         # LTX-Video Config Card

@@ -412,11 +412,42 @@ class WhatsAppAutomationWidget(QWidget):
         layout.addWidget(help_group)
 
     def _auth_whatsapp(self):
-        self.log.appendPlainText("[Info] Opening background session...")
-        time.sleep(1)
-        self.lbl_wa_status.setText("Session Status: Connected ✓")
-        self.lbl_wa_status.setStyleSheet("color: #22c55e; font-weight: bold;")
-        QMessageBox.information(self, "Connected", "WhatsApp Web Session active and synced!")
+        self.log.appendPlainText("[Info] Starting WhatsApp Web authentication session...")
+        
+        def run_browser():
+            from patchright.sync_api import sync_playwright
+            try:
+                profile_dir = Path.home() / 'Documents' / 'dola_downloads' / 'profiles' / 'whatsapp_session'
+                profile_dir.mkdir(parents=True, exist_ok=True)
+                with sync_playwright() as p:
+                    launch_args = [
+                        "--disable-blink-features=AutomationControlled",
+                        "--no-sandbox"
+                    ]
+                    context = p.chromium.launch_persistent_context(
+                        user_data_dir=str(profile_dir),
+                        headless=False,
+                        args=launch_args,
+                        viewport={"width": 1280, "height": 800}
+                    )
+                    page = context.pages[0] if context.pages else context.new_page()
+                    page.goto("https://web.whatsapp.com/")
+                    
+                    self.lbl_wa_status.setText("Session Status: Scanning QR...")
+                    self.lbl_wa_status.setStyleSheet("color: #e67e22; font-weight: bold;")
+                    self.log.appendPlainText("[Info] Browser window open. Please scan the QR code using Link Device on WhatsApp.")
+                    
+                    # Keep browser open until user closes it
+                    while len(context.pages) > 0:
+                        time.sleep(0.5)
+                        
+                    self.lbl_wa_status.setText("Session Status: Connected ✓")
+                    self.lbl_wa_status.setStyleSheet("color: #22c55e; font-weight: bold;")
+                    self.log.appendPlainText("[Info] WhatsApp authentication completed. Session saved successfully.")
+            except Exception as e:
+                self.log.appendPlainText(f"[Error] Failed to load WhatsApp session: {e}")
+                
+        threading.Thread(target=run_browser, daemon=True).start()
 
     def load_leads_file(self, path: str):
         if not path or not os.path.exists(path):
