@@ -608,7 +608,10 @@ class SnapGenAutomationWidget(QWidget):
                         viewport={"width": 1280, "height": 800}
                     )
                     page = context.pages[0] if context.pages else context.new_page()
-                    page.goto("http://snapgen.ai/")
+                    try:
+                        page.goto("https://snapgen.ai/", timeout=15000)
+                    except Exception as ge:
+                        print("Initial navigation timeout/error, user can navigate manually:", ge)
                     while len(context.pages) > 0:
                         time.sleep(0.5)
             except Exception as e:
