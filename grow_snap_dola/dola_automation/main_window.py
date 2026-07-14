@@ -739,7 +739,11 @@ class MainWindow(QMainWindow):
         lic_lbl.setStyleSheet("color: #2ecc71; font-weight: bold; background: rgba(46, 204, 113, 0.08); border: 1px solid rgba(46, 204, 113, 0.22); border-radius: 6px; padding: 5px 12px; font-size: 11px;")
         header_layout.addWidget(lic_lbl)
         
-        version_lbl = QLabel("V1.0 PREMIUM", self)
+        try:
+            from grow_snap_dola.main import APP_VERSION
+            version_lbl = QLabel(f"V{APP_VERSION} PREMIUM", self)
+        except Exception:
+            version_lbl = QLabel("V1.0.8 PREMIUM", self)
         version_lbl.setObjectName("version_badge")
         header_layout.addWidget(version_lbl)
 

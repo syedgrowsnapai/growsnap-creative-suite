@@ -920,6 +920,19 @@ class ScriptToVideoAgentWidget(QWidget):
                 "Visual: Golden Lamplight bedside lamp, parent soft whispering to toddler.\n"
                 "Narration: And now, that same ancient tortoise has a message for you: sleep is sweet, and you are safe."
             )
+            # Socket precheck to avoid requests.post hang if port is dead
+            import socket
+            server_online = False
+            try:
+                with socket.create_connection(("127.0.0.1", 7000), timeout=1.0) as sock:
+                    server_online = True
+            except Exception:
+                pass
+
+            if not server_online:
+                logger.info("Odysseus local AI server is offline. Falling back to default storyboard outline.")
+                return simulated_script
+
             try:
                 url = "http://localhost:7000/api/chat"
                 payload = {
@@ -930,7 +943,7 @@ class ScriptToVideoAgentWidget(QWidget):
                     ],
                     "stream": False
                 }
-                response = requests.post(url, json=payload, timeout=8)
+                response = requests.post(url, json=payload, timeout=4)
                 if response.status_code == 200:
                     data = response.json()
                     storyboard = data.get("message", {}).get("content", "").strip()
@@ -942,7 +955,21 @@ class ScriptToVideoAgentWidget(QWidget):
             return simulated_script
 
         def thread_target():
-            result = run_api_query()
+            try:
+                result = run_api_query()
+            except Exception as e:
+                logger.warning(f"Unhandled error in brainstorm thread: {e}")
+                result = (
+                    "SCENE 1:\n"
+                    "Visual: A giant ancient tortoise slowly walking on a grassy hill under a golden sunset.\n"
+                    "Narration: Long ago, on a quiet hill, lived a tortoise who had seen a thousand nights.\n\n"
+                    "SCENE 2:\n"
+                    "Visual: Bedside lamp illuminating a kids room, starry sky outside window.\n"
+                    "Narration: Each night, he would tell the forest animals stories that brought deep, peaceful rest.\n\n"
+                    "SCENE 3:\n"
+                    "Visual: Golden Lamplight bedside lamp, parent soft whispering to toddler.\n"
+                    "Narration: And now, that same ancient tortoise has a message for you: sleep is sweet, and you are safe."
+                )
             QTimer.singleShot(0, lambda: self._on_script_brainstormed_with_data(result))
 
         threading.Thread(target=thread_target, daemon=True).start()
@@ -1024,6 +1051,19 @@ class ScriptToVideoAgentWidget(QWidget):
                     "Visual: Golden Lamplight bedside lamp, parent soft whispering to toddler.\n"
                     "Narration: And now, that same ancient tortoise has a message for you: sleep is sweet, and you are safe."
                 )
+                # Socket precheck to avoid requests.post hang if port is dead
+                import socket
+                server_online = False
+                try:
+                    with socket.create_connection(("127.0.0.1", 7000), timeout=1.0) as sock:
+                        server_online = True
+                except Exception:
+                    pass
+
+                if not server_online:
+                    logger.info("Odysseus local AI server is offline. Falling back to default storyboard outline.")
+                    return simulated_script
+
                 try:
                     url = "http://localhost:7000/api/chat"
                     payload = {
@@ -1034,7 +1074,7 @@ class ScriptToVideoAgentWidget(QWidget):
                         ],
                         "stream": False
                     }
-                    response = requests.post(url, json=payload, timeout=8)
+                    response = requests.post(url, json=payload, timeout=4)
                     if response.status_code == 200:
                         data = response.json()
                         storyboard = data.get("message", {}).get("content", "").strip()
@@ -1045,7 +1085,21 @@ class ScriptToVideoAgentWidget(QWidget):
                 return simulated_script
 
             def thread_target():
-                result = run_api_query()
+                try:
+                    result = run_api_query()
+                except Exception as e:
+                    logger.warning(f"Unhandled error in auto-submit brainstorm thread: {e}")
+                    result = (
+                        "SCENE 1:\n"
+                        "Visual: A giant ancient tortoise slowly walking on a grassy hill under a golden sunset.\n"
+                        "Narration: Long ago, on a quiet hill, lived a tortoise who had seen a thousand nights.\n\n"
+                        "SCENE 2:\n"
+                        "Visual: Bedside lamp illuminating a kids room, starry sky outside window.\n"
+                        "Narration: Each night, he would tell the forest animals stories that brought deep, peaceful rest.\n\n"
+                        "SCENE 3:\n"
+                        "Visual: Golden Lamplight bedside lamp, parent soft whispering to toddler.\n"
+                        "Narration: And now, that same ancient tortoise has a message for you: sleep is sweet, and you are safe."
+                    )
                 QTimer.singleShot(0, lambda: self._on_script_brainstormed_for_auto_run(result))
 
             threading.Thread(target=thread_target, daemon=True).start()
