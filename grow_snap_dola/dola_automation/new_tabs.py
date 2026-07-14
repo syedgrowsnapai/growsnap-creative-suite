@@ -601,12 +601,23 @@ class SnapGenAutomationWidget(QWidget):
                 from patchright.sync_api import sync_playwright
                 with sync_playwright() as p:
                     launch_args = ["--disable-blink-features=AutomationControlled"]
-                    context = p.chromium.launch_persistent_context(
-                        user_data_dir=str(profile_dir),
-                        headless=False,
-                        args=launch_args,
-                        viewport={"width": 1280, "height": 800}
-                    )
+                    try:
+                        # Attempt to use native Chrome browser to permit Google Login authentication
+                        context = p.chromium.launch_persistent_context(
+                            user_data_dir=str(profile_dir),
+                            headless=False,
+                            channel="chrome",
+                            args=launch_args,
+                            viewport={"width": 1280, "height": 800}
+                        )
+                    except Exception as ce:
+                        print("Failed to launch native Chrome channel, falling back to default Chromium:", ce)
+                        context = p.chromium.launch_persistent_context(
+                            user_data_dir=str(profile_dir),
+                            headless=False,
+                            args=launch_args,
+                            viewport={"width": 1280, "height": 800}
+                        )
                     page = context.pages[0] if context.pages else context.new_page()
                     try:
                         page.goto("https://snapgen.ai/", timeout=15000)
