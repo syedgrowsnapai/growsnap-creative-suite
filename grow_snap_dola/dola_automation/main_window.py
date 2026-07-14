@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QMessageBox, QTabWidget, QSplitter, QListWidget, QListWidgetItem,
     QLineEdit, QPlainTextEdit, QGroupBox, QAbstractItemView, QHeaderView, QMenu, QDialog,
     QApplication, QSystemTrayIcon, QButtonGroup, QStackedWidget, QStylePainter, QStyleOptionComboBox, QStyle,
-    QInputDialog
+    QInputDialog, QScrollArea
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot, QTimer, QTime, QElapsedTimer, QPoint, QEvent
 from PyQt6.QtGui import QColor, QCursor, QAction, QKeySequence, QShortcut, QIcon, QPalette, QStandardItemModel, QStandardItem
@@ -817,8 +817,13 @@ class MainWindow(QMainWindow):
         # 3. Main Splitter View
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         
-        # Left Panel (Inputs & Controls)
-        left = QWidget(self)
+        # Left Panel (Inputs & Controls) wrapped in QScrollArea
+        left_scroll = QScrollArea(self)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
+        left = QWidget()
+        left.setObjectName("left_panel_container")
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(15)
@@ -1067,7 +1072,8 @@ class MainWindow(QMainWindow):
         help_row.addWidget(self.btn_upgrade)
         left_layout.addLayout(help_row)
 
-        splitter.addWidget(left)
+        left_scroll.setWidget(left)
+        splitter.addWidget(left_scroll)
 
         # Right Panel (Tab Widgets for logs, lists, history - standalone sub-tabs)
         right = QTabWidget(self)

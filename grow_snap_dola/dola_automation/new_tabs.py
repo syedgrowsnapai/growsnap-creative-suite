@@ -10,10 +10,11 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
     QProgressBar, QTableWidget, QTableWidgetItem, QCheckBox, QSpinBox, QComboBox,
     QFileDialog, QMessageBox, QSplitter, QListWidget, QListWidgetItem, QLineEdit, QPlainTextEdit,
-    QGroupBox, QHeaderView, QAbstractItemView, QFrame, QButtonGroup, QTabWidget
+    QGroupBox, QHeaderView, QAbstractItemView, QFrame, QButtonGroup, QTabWidget, QScrollArea,
+    QStylePainter, QStyleOptionComboBox, QMenu, QApplication
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot, QTimer, QTime
-from PyQt6.QtGui import QColor, QIcon
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot, QTimer, QTime, QEvent
+from PyQt6.QtGui import QColor, QIcon, QPalette, QStandardItemModel, QStandardItem
 
 # Check if QWebEngineView is available
 try:
@@ -22,14 +23,98 @@ try:
 except ImportError:
     WEB_ENGINE_AVAILABLE = False
 
-from dola_automation.models import AutomationSettings, PromptJob, JobStatus
+from dola_automation.models import AutomationSettings, PromptJob, JobStatus, parse_prompts, align_reference_images
 from dola_automation.styles import GradientLabel, STATUS_COLORS
+from PyQt6.QtWidgets import QStyle
+
+class CheckableComboBox(QComboBox):
+    checkedItemsChanged = pyqtSignal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setModel(QStandardItemModel(self))
+        self.model().dataChanged.connect(self._on_data_changed)
+        self.view().viewport().installEventFilter(self)
+        
+    def add_checkable_item(self, text, checked=False):
+        item = QStandardItem(text)
+        item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+        item.setData(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked, Qt.ItemDataRole.CheckStateRole)
+        self.model().appendRow(item)
+        
+    def _on_data_changed(self, topLeft, bottomRight, roles):
+        if Qt.ItemDataRole.CheckStateRole in roles:
+            self.checkedItemsChanged.emit()
+            
+    def get_checked_items(self):
+        checked = []
+        for i in range(self.count()):
+            item = self.model().item(i)
+            if item and item.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked:
+                checked.append(item.text().lower())
+        return checked
+
+    def set_checked_items(self, items_list):
+        self.model().blockSignals(True)
+        for i in range(self.count()):
+            item = self.model().item(i)
+            if item:
+                state = Qt.CheckState.Checked if item.text().lower() in items_list else Qt.CheckState.Unchecked
+                item.setData(state, Qt.ItemDataRole.CheckStateRole)
+        self.model().blockSignals(False)
+        self.checkedItemsChanged.emit()
+
+    def eventFilter(self, widget, event):
+        if widget == self.view().viewport() and event.type() == QEvent.Type.MouseButtonPress:
+            index = self.view().indexAt(event.pos())
+            item = self.model().itemFromIndex(index)
+            if item:
+                current = item.data(Qt.ItemDataRole.CheckStateRole)
+                new_state = Qt.CheckState.Unchecked if current == Qt.CheckState.Checked else Qt.CheckState.Checked
+                item.setData(new_state, Qt.ItemDataRole.CheckStateRole)
+                
+                if item.text() == "All Statuses":
+                    self.model().blockSignals(True)
+                    for i in range(1, self.count()):
+                        sibling = self.model().item(i)
+                        if sibling:
+                            sibling.setData(new_state, Qt.ItemDataRole.CheckStateRole)
+                    self.model().blockSignals(False)
+                    self.checkedItemsChanged.emit()
+                else:
+                    all_item = self.model().item(0)
+                    if all_item and new_state == Qt.CheckState.Unchecked:
+                        self.model().blockSignals(True)
+                        all_item.setData(Qt.CheckState.Unchecked, Qt.ItemDataRole.CheckStateRole)
+                        self.model().blockSignals(False)
+                        self.checkedItemsChanged.emit()
+                return True
+        return super().eventFilter(widget, event)
+
+    def paintEvent(self, event):
+        painter = QStylePainter(self)
+        painter.setPen(self.palette().color(QPalette.ColorRole.Text))
+        opt = QStyleOptionComboBox()
+        self.initStyleOption(opt)
+        checked = [self.model().item(i).text() for i in range(1, self.count()) 
+                   if self.model().item(i).data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked]
+        if len(checked) == self.count() - 1:
+            opt.currentText = "All Statuses"
+        elif not checked:
+            opt.currentText = "None selected"
+        else:
+            opt.currentText = ", ".join(checked)
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, opt)
+        painter.drawControl(QStyle.ControlElement.CE_ComboBoxLabel, opt)
+
 
 class SnapGenAutomationWidget(QWidget):
     def __init__(self, parent=None, db_path=None, global_settings=None):
         super().__init__(parent)
         self.db_path = db_path
         self.settings = global_settings or AutomationSettings()
+        self.jobs = []
+        self.reference_paths = []
         self._init_ui()
 
     def _stat_card(self, label_text: str, default_val: str) -> QFrame:
@@ -46,7 +131,7 @@ class SnapGenAutomationWidget(QWidget):
         return card
 
     def _init_ui(self):
-        self.gen_mode = "video" # default mode
+        self.gen_mode = "video"
         self.is_paused = False
         self.is_running = False
         
@@ -90,20 +175,24 @@ class SnapGenAutomationWidget(QWidget):
         stats_row.addWidget(self.stat_fail)
         stats_row.addWidget(timer_card)
         
-        # Add stats row with 0 stretch factor to prevent vertical stretching
         layout.addLayout(stats_row, 0)
 
         # Splitter Layout (takes stretch factor 1)
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         layout.addWidget(splitter, 1)
 
-        # Left panel: Inputs & Controls
-        left = QWidget(self)
+        # Left Scroll Panel (Inputs & Controls)
+        left_scroll = QScrollArea(self)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
+        left = QWidget()
+        left.setObjectName("left_panel_container")
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(15)
         
-        # Mode Selection
+        # 1. Mode Selection
         mode_group = QGroupBox("GENERATION MODE", self)
         mode_lay = QHBoxLayout(mode_group)
         
@@ -125,26 +214,55 @@ class SnapGenAutomationWidget(QWidget):
         mode_lay.addWidget(self.btn_mode_image)
         left_layout.addWidget(mode_group)
         
-        # Prompt Ingestion
+        # 2. Prompt Ingestion Card (Dola-aligned)
         ingest_group = QGroupBox("PROMPT INGESTION", self)
         ingest_lay = QVBoxLayout(ingest_group)
         self.prompt_editor = QPlainTextEdit(self)
         self.prompt_editor.setPlaceholderText("Enter video/image generation prompts here...")
         ingest_lay.addWidget(self.prompt_editor)
         
-        file_row = QHBoxLayout()
+        path_row = QHBoxLayout()
         self.edit_path = QLineEdit(self)
-        self.edit_path.setPlaceholderText("Select CSV / TXT file...")
-        btn_browse = QPushButton("Browse", self)
-        btn_browse.clicked.connect(self._browse_prompt_file)
-        file_row.addWidget(self.edit_path)
-        file_row.addWidget(btn_browse)
-        ingest_lay.addLayout(file_row)
+        self.edit_path.setPlaceholderText("Paste CSV/TXT file path here...")
+        self.btn_load_path = QPushButton("Load Path", self)
+        self.btn_load_path.clicked.connect(self._load_prompt_from_path)
+        path_row.addWidget(self.edit_path)
+        path_row.addWidget(self.btn_load_path)
+        ingest_lay.addLayout(path_row)
+        
+        btn_row = QHBoxLayout()
+        self.btn_load_file = QPushButton("Load CSV/TXT", self)
+        self.btn_load_file.clicked.connect(self._load_prompt_file)
+        self.btn_parse = QPushButton("Parse prompts", self)
+        self.btn_parse.clicked.connect(self._parse_prompts)
+        btn_row.addWidget(self.btn_load_file)
+        btn_row.addWidget(self.btn_parse)
+        ingest_lay.addLayout(btn_row)
         left_layout.addWidget(ingest_group)
 
-        # Operational buttons
+        # 3. Reference Image Picker
+        ref_group = QGroupBox("REFERENCE IMAGES", self)
+        ref_layout = QVBoxLayout(ref_group)
+        self.ref_list = QListWidget(self)
+        self.ref_list.setMaximumHeight(100)
+        ref_layout.addWidget(self.ref_list)
+
+        ref_btns = QHBoxLayout()
+        self.btn_ref_files = QPushButton("Pick images", self)
+        self.btn_ref_files.clicked.connect(self._pick_reference_files)
+        self.btn_ref_folder = QPushButton("Pick folder", self)
+        self.btn_ref_folder.clicked.connect(self._pick_reference_folder)
+        self.btn_clear_refs = QPushButton("Clear", self)
+        self.btn_clear_refs.clicked.connect(self._clear_references)
+        ref_btns.addWidget(self.btn_ref_files)
+        ref_btns.addWidget(self.btn_ref_folder)
+        ref_btns.addWidget(self.btn_clear_refs)
+        ref_layout.addLayout(ref_btns)
+        left_layout.addWidget(ref_group)
+
+        # 4. Operational Buttons
         btn_lay = QHBoxLayout()
-        self.btn_start = QPushButton("Start Batch", self)
+        self.btn_start = QPushButton("Start batch", self)
         self.btn_start.setObjectName("primary")
         self.btn_start.clicked.connect(self._start_batch)
         
@@ -162,7 +280,7 @@ class SnapGenAutomationWidget(QWidget):
         btn_lay.addWidget(self.btn_stop)
         left_layout.addLayout(btn_lay)
 
-        # Help / Instructions buttons row (exactly matching Dola)
+        # 5. Help Row Buttons
         help_row = QHBoxLayout()
         self.btn_instructions = QPushButton("Instructions", self)
         self.btn_instructions.clicked.connect(lambda: self.window()._show_tool_popup_guide(16))
@@ -176,12 +294,96 @@ class SnapGenAutomationWidget(QWidget):
         help_row.addWidget(self.btn_upgrade)
         left_layout.addLayout(help_row)
 
-        splitter.addWidget(left)
+        left_scroll.setWidget(left)
+        splitter.addWidget(left_scroll)
 
-        # Right panel: QTabWidget for Settings, Status, Logs, History
+        # Right panel: QTabWidget matching Dola structure
         self.right_tabs = QTabWidget(self)
         
-        # Tab 1: Settings
+        # Tab 1: Current Jobs
+        self.tab_current = QWidget(self)
+        tab_current_lay = QVBoxLayout(self.tab_current)
+        
+        filter_bar = QHBoxLayout()
+        filter_bar.setSpacing(10)
+        
+        lbl_filter = QLabel("Filter Status:", self)
+        lbl_filter.setStyleSheet("font-weight: bold; color: #2ecc71;")
+        filter_bar.addWidget(lbl_filter)
+        
+        self.combo_filter_status = CheckableComboBox(self)
+        self.combo_filter_status.add_checkable_item("All Statuses", checked=True)
+        self.combo_filter_status.add_checkable_item("Pending", checked=True)
+        self.combo_filter_status.add_checkable_item("Running", checked=True)
+        self.combo_filter_status.add_checkable_item("Waiting", checked=True)
+        self.combo_filter_status.add_checkable_item("Downloading", checked=True)
+        self.combo_filter_status.add_checkable_item("Completed", checked=True)
+        self.combo_filter_status.add_checkable_item("Submitted", checked=True)
+        self.combo_filter_status.add_checkable_item("Failed", checked=True)
+        self.combo_filter_status.add_checkable_item("Cancelled", checked=True)
+        self.combo_filter_status.add_checkable_item("Has Error Details", checked=True)
+        self.combo_filter_status.checkedItemsChanged.connect(self._apply_table_filters)
+        filter_bar.addWidget(self.combo_filter_status)
+        
+        lbl_search = QLabel("Search:", self)
+        lbl_search.setStyleSheet("font-weight: bold; color: #2ecc71; margin-left: 10px;")
+        filter_bar.addWidget(lbl_search)
+        
+        self.edit_search = QLineEdit(self)
+        self.edit_search.setPlaceholderText("Search rows...")
+        self.edit_search.textChanged.connect(self._apply_table_filters)
+        filter_bar.addWidget(self.edit_search)
+        
+        self.btn_clear_filters = QPushButton("Clear Filters", self)
+        self.btn_clear_filters.clicked.connect(self._clear_filters)
+        filter_bar.addWidget(self.btn_clear_filters)
+        
+        tab_current_lay.addLayout(filter_bar)
+        
+        self.table = QTableWidget(self)
+        self.table.setColumnCount(9)
+        self.table.setHorizontalHeaderLabels([
+            "Index", "Video Title", "Scene Index", "Prompt", "Reference", "Status", "Download Path", "Error Details", "Action"
+        ])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table.setColumnWidth(0, 50)
+        self.table.setColumnWidth(1, 120)
+        self.table.setColumnWidth(2, 80)
+        self.table.setColumnWidth(3, 200)
+        self.table.setColumnWidth(4, 90)
+        self.table.setColumnWidth(5, 90)
+        self.table.setColumnWidth(6, 120)
+        self.table.setColumnWidth(7, 120)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_table_context_menu)
+        tab_current_lay.addWidget(self.table)
+        
+        action_bar = QHBoxLayout()
+        self.btn_select_all = QPushButton("Select All", self)
+        self.btn_select_all.clicked.connect(self._toggle_select_all)
+        self.btn_download_selected = QPushButton("Download Selected", self)
+        self.btn_download_selected.clicked.connect(self._download_selected_jobs)
+        self.btn_retry_failed = QPushButton("Retry All Failed", self)
+        self.btn_retry_failed.clicked.connect(self._retry_all_failed_jobs)
+        action_bar.addWidget(self.btn_select_all)
+        action_bar.addWidget(self.btn_download_selected)
+        action_bar.addWidget(self.btn_retry_failed)
+        tab_current_lay.addLayout(action_bar)
+        
+        self.right_tabs.addTab(self.tab_current, "Current Jobs")
+
+        # Tab 2: History Logs
+        self.tab_logs = QWidget(self)
+        tab_logs_lay = QVBoxLayout(self.tab_logs)
+        self.txt_log = QPlainTextEdit(self)
+        self.txt_log.setReadOnly(True)
+        self.txt_log.setPlaceholderText("Console logs...")
+        tab_logs_lay.addWidget(self.txt_log)
+        self.right_tabs.addTab(self.tab_logs, "History Logs")
+
+        # Tab 3: Settings
         self.tab_settings = QWidget(self)
         tab_settings_lay = QVBoxLayout(self.tab_settings)
         tab_settings_lay.setContentsMargins(10, 10, 10, 10)
@@ -208,7 +410,7 @@ class SnapGenAutomationWidget(QWidget):
         self.combo_image_model.addItems(["Nano Banana Pro/2", "Nano Banana Lite"])
         image_lay.addWidget(self.combo_image_model, 0, 1)
         tab_settings_lay.addWidget(self.group_image_params)
-        self.group_image_params.setVisible(False) # video mode by default
+        self.group_image_params.setVisible(False)
         
         # General parameters
         gen_params_group = QGroupBox("GENERAL SETTINGS", self)
@@ -258,32 +460,9 @@ class SnapGenAutomationWidget(QWidget):
         tab_settings_lay.addWidget(profile_group)
         
         tab_settings_lay.addStretch()
-        self.right_tabs.addTab(self.tab_settings, "⚙️ Settings")
+        self.right_tabs.addTab(self.tab_settings, "Settings")
 
-        # Tab 2: Current Batch
-        self.tab_current = QWidget(self)
-        tab_current_lay = QVBoxLayout(self.tab_current)
-        
-        monitor_group = QGroupBox("GENERATION STATUS MONITOR", self)
-        mon_lay = QVBoxLayout(monitor_group)
-        self.table = QTableWidget(self)
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["Index", "Prompt", "Status", "Progress"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        mon_lay.addWidget(self.table)
-        tab_current_lay.addWidget(monitor_group)
-        self.right_tabs.addTab(self.tab_current, "📊 Current Batch")
-
-        # Tab 3: Logs
-        self.tab_logs = QWidget(self)
-        tab_logs_lay = QVBoxLayout(self.tab_logs)
-        self.txt_log = QPlainTextEdit(self)
-        self.txt_log.setReadOnly(True)
-        self.txt_log.setPlaceholderText("Console execution logs will appear here...")
-        tab_logs_lay.addWidget(self.txt_log)
-        self.right_tabs.addTab(self.tab_logs, "📝 Logs")
-
-        # Tab 4: History
+        # Tab 4: Lifetime History
         self.tab_history = QWidget(self)
         tab_history_lay = QVBoxLayout(self.tab_history)
         self.table_history = QTableWidget(self)
@@ -291,7 +470,7 @@ class SnapGenAutomationWidget(QWidget):
         self.table_history.setHorizontalHeaderLabels(["Timestamp", "Prompt", "Type", "Status"])
         self.table_history.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         tab_history_lay.addWidget(self.table_history)
-        self.right_tabs.addTab(self.tab_history, "📜 History")
+        self.right_tabs.addTab(self.tab_history, "Lifetime History")
 
         splitter.addWidget(self.right_tabs)
         splitter.setSizes([450, 550])
@@ -302,13 +481,13 @@ class SnapGenAutomationWidget(QWidget):
         self.gen_mode = "video"
         self.group_video_params.setVisible(True)
         self.group_image_params.setVisible(False)
-        self.right_tabs.setCurrentIndex(0)
+        self.right_tabs.setCurrentIndex(2) # Switch to Settings tab
 
     def _select_image_mode(self):
         self.gen_mode = "image"
         self.group_video_params.setVisible(False)
         self.group_image_params.setVisible(True)
-        self.right_tabs.setCurrentIndex(0)
+        self.right_tabs.setCurrentIndex(2) # Switch to Settings tab
 
     def _pick_download_dir(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Download Directory")
@@ -387,29 +566,188 @@ class SnapGenAutomationWidget(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "Select Prompt File", "", "Text Files (*.txt *.csv)")
         if path:
             self.edit_path.setText(path)
+            self._load_prompt_from_path()
+
+    def _load_prompt_from_path(self):
+        path = self.edit_path.text().strip()
+        if not path:
+            return
+        path_obj = Path(path)
+        if path_obj.exists() and path_obj.is_file():
             try:
-                with open(path, 'r', encoding='utf-8') as f:
+                with open(path_obj, 'r', encoding='utf-8') as f:
                     self.prompt_editor.setPlainText(f.read())
+                self.txt_log.appendPlainText(f"[Info] Loaded prompts from: {path_obj.name}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to load file: {e}")
 
-    def _start_batch(self):
-        prompts = self.prompt_editor.toPlainText().strip().split('\n')
-        prompts = [p.strip() for p in prompts if p.strip()]
-        if not prompts:
-            QMessageBox.warning(self, "Warning", "Please enter at least one prompt.")
+    def _load_prompt_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select Prompt File", "", "Text Files (*.txt *.csv)")
+        if path:
+            self.edit_path.setText(path)
+            self._load_prompt_from_path()
+
+    def _parse_prompts(self):
+        text = self.prompt_editor.toPlainText().strip()
+        if not text:
+            QMessageBox.warning(self, "No prompts", "Please enter prompts in the editor before parsing.")
             return
 
-        self.txt_log.appendPlainText(f"[Info] Starting batch of {len(prompts)} prompts in {self.gen_mode.upper()} mode...")
+        parsed = parse_prompts(text)
+        if not parsed:
+            QMessageBox.warning(self, "Failed to parse", "No valid prompts parsed. Check text format.")
+            return
+
+        self.jobs.clear()
+        for idx, (prompt, caption, title, scene_idx) in enumerate(parsed):
+            ref = self.reference_paths[idx] if idx < len(self.reference_paths) else None
+            job = PromptJob(
+                index=idx + 1,
+                prompt=prompt,
+                caption=caption,
+                video_title=title or f"Video_{idx // 4 + 1}",
+                scene_index=scene_idx or (idx % 4 + 1),
+                reference_image=ref,
+                status=JobStatus.PENDING
+            )
+            self.jobs.append(job)
+
+        self._refresh_table()
+        self._update_stats()
+        self.txt_log.appendPlainText(f"[Info] Parsed {len(self.jobs)} prompts successfully.")
+        self.right_tabs.setCurrentIndex(0) # Switch to Current Jobs
+
+    def _pick_reference_files(self):
+        files, _ = QFileDialog.getOpenFileNames(self, "Select Reference Images", "", "Image Files (*.png *.jpg *.jpeg)")
+        if files:
+            for f in files:
+                if f not in self.reference_paths:
+                    self.reference_paths.append(f)
+                    self.ref_list.addItem(Path(f).name)
+
+    def _pick_reference_folder(self):
+        dir_path = QFileDialog.getExistingDirectory(self, "Select Reference Folder")
+        if dir_path:
+            p = Path(dir_path)
+            for f in p.iterdir():
+                if f.is_file() and f.suffix.lower() in ('.png', '.jpg', '.jpeg'):
+                    fp = str(f.resolve())
+                    if fp not in self.reference_paths:
+                        self.reference_paths.append(fp)
+                        self.ref_list.addItem(f.name)
+
+    def _clear_references(self):
+        self.reference_paths.clear()
+        self.ref_list.clear()
+
+    def _apply_table_filters(self):
+        self._refresh_table()
+
+    def _clear_filters(self):
+        self.edit_search.clear()
+        self.combo_filter_status.set_checked_items(["all statuses"])
+        self._refresh_table()
+
+    def _toggle_select_all(self):
+        if self.table.rowCount() == 0:
+            return
+        selected = self.table.selectedItems()
+        if len(selected) > 0:
+            self.table.clearSelection()
+        else:
+            self.table.selectAll()
+
+    def _download_selected_jobs(self):
+        selected_rows = list(set(index.row() for index in self.table.selectedIndexes()))
+        if not selected_rows:
+            QMessageBox.information(self, "Selection Required", "Please select one or more jobs in the table first.")
+            return
+        QMessageBox.information(self, "Downloading", f"Downloading completed output clips for {len(selected_rows)} selected rows...")
+
+    def _retry_all_failed_jobs(self):
+        retried = 0
+        for job in self.jobs:
+            if job.status == JobStatus.FAILED:
+                job.status = JobStatus.PENDING
+                retried += 1
+        if retried > 0:
+            self._refresh_table()
+            self._update_stats()
+            self.txt_log.appendPlainText(f"[Info] Reset {retried} failed jobs back to PENDING state.")
+        else:
+            QMessageBox.information(self, "No Failed Jobs", "There are no FAILED jobs in the current batch queue.")
+
+    def _toggle_job_action(self, row, job):
+        QMessageBox.information(self, "Job Action", f"Action requested for Row #{row + 1}: {job.prompt[:30]}...")
+
+    def _on_table_context_menu(self, pos):
+        item = self.table.itemAt(pos)
+        if not item:
+            return
+        row = item.row()
+        menu = QMenu(self)
+        copy_action = menu.addAction("Copy Prompt")
+        action = menu.exec(self.table.viewport().mapToGlobal(pos))
+        if action == copy_action:
+            prompt_text = self.table.item(row, 3).text()
+            QApplication.clipboard().setText(prompt_text)
+
+    def _refresh_table(self):
         self.table.setRowCount(0)
-        for idx, prompt in enumerate(prompts):
+        search_text = self.edit_search.text().strip().lower()
+        filter_statuses = self.combo_filter_status.get_checked_items()
+        show_all = "all statuses" in filter_statuses
+
+        for idx, job in enumerate(self.jobs):
+            # Check search filter
+            if search_text and search_text not in job.prompt.lower() and search_text not in job.video_title.lower():
+                continue
+            
+            # Check status filter
+            status_str = job.status.value.lower()
+            if not show_all and status_str not in filter_statuses:
+                continue
+
             row = self.table.rowCount()
             self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(str(idx + 1)))
-            self.table.setItem(row, 1, QTableWidgetItem(prompt))
-            self.table.setItem(row, 2, QTableWidgetItem("Queued"))
-            self.table.setItem(row, 3, QTableWidgetItem("0%"))
+            self.table.setItem(row, 0, QTableWidgetItem(str(job.index)))
+            self.table.setItem(row, 1, QTableWidgetItem(job.video_title))
+            self.table.setItem(row, 2, QTableWidgetItem(str(job.scene_index)))
+            self.table.setItem(row, 3, QTableWidgetItem(job.prompt))
+            self.table.setItem(row, 4, QTableWidgetItem(Path(job.reference_image).name if job.reference_image else "None"))
+            self.table.setItem(row, 5, QTableWidgetItem(job.status.value))
+            
+            # Apply color to status
+            status_color = STATUS_COLORS.get(job.status.value.lower(), "#ffffff")
+            self.table.item(row, 5).setForeground(QColor(status_color))
+            
+            self.table.setItem(row, 6, QTableWidgetItem("-"))
+            self.table.setItem(row, 7, QTableWidgetItem("-"))
+            
+            # Add action button
+            btn_action = QPushButton("Action", self)
+            btn_action.clicked.connect(lambda checked, r=row, j=job: self._toggle_job_action(r, j))
+            self.table.setCellWidget(row, 8, btn_action)
 
+    def _update_stats(self):
+        total = len(self.jobs)
+        failed = sum(1 for j in self.jobs if j.status == JobStatus.FAILED)
+        completed = sum(1 for j in self.jobs if j.status == JobStatus.COMPLETED)
+        
+        try:
+            self.stat_total.findChild(QLabel, "statValue").setText(str(total))
+            self.stat_fail.findChild(QLabel, "statValue").setText(str(failed))
+            self.stat_batch.findChild(QLabel, "statValue").setText(str(completed))
+        except Exception:
+            pass
+
+    def _start_batch(self):
+        if not self.jobs:
+            self._parse_prompts()
+            if not self.jobs:
+                return
+
+        self.txt_log.appendPlainText(f"[Info] Starting batch execution of {len(self.jobs)} jobs in {self.gen_mode.upper()} mode...")
         self.is_running = True
         self.is_paused = False
         self.elapsed_seconds = 0
@@ -421,7 +759,7 @@ class SnapGenAutomationWidget(QWidget):
         self.btn_pause.setText("Pause")
         self.btn_stop.setEnabled(True)
         
-        self.right_tabs.setCurrentIndex(1)
+        self.right_tabs.setCurrentIndex(0) # Current Jobs
 
         self.mock_index = 0
         self.mock_progress = 0
@@ -431,7 +769,7 @@ class SnapGenAutomationWidget(QWidget):
         if not self.is_running or self.is_paused:
             return
             
-        if self.mock_index >= self.table.rowCount():
+        if self.mock_index >= len(self.jobs):
             self.is_running = False
             self.batch_timer.stop()
             self.btn_start.setEnabled(True)
@@ -439,35 +777,37 @@ class SnapGenAutomationWidget(QWidget):
             self.btn_stop.setEnabled(False)
             self.txt_log.appendPlainText("[Info] Batch completed successfully!")
             
-            for row in range(self.table.rowCount()):
-                p = self.table.item(row, 1).text()
+            for job in self.jobs:
+                job.status = JobStatus.COMPLETED
                 h_row = self.table_history.rowCount()
                 self.table_history.insertRow(h_row)
                 self.table_history.setItem(h_row, 0, QTableWidgetItem(time.strftime("%Y-%m-%d %H:%M:%S")))
-                self.table_history.setItem(h_row, 1, QTableWidgetItem(p))
+                self.table_history.setItem(h_row, 1, QTableWidgetItem(job.prompt))
                 self.table_history.setItem(h_row, 2, QTableWidgetItem(self.gen_mode.upper()))
                 self.table_history.setItem(h_row, 3, QTableWidgetItem("COMPLETED"))
                 
-            # Safely set metrics values
+            self._refresh_table()
+            self._update_stats()
+            
             try:
                 self.stat_lifetime.findChild(QLabel, "statValue").setText(
-                    str(int(self.stat_lifetime.findChild(QLabel, "statValue").text()) + self.table.rowCount())
+                    str(int(self.stat_lifetime.findChild(QLabel, "statValue").text()) + len(self.jobs))
                 )
-                self.stat_batch.findChild(QLabel, "statValue").setText(str(self.table.rowCount()))
-                self.stat_total.findChild(QLabel, "statValue").setText(str(self.table.rowCount()))
             except Exception:
                 pass
             
             QMessageBox.information(self, "Completed", "SnapGen AI batch processing completed successfully!")
             return
 
-        self.table.setItem(self.mock_index, 2, QTableWidgetItem("Processing"))
+        active_job = self.jobs[self.mock_index]
+        active_job.status = JobStatus.RUNNING
+        self._refresh_table()
+        
         self.mock_progress += 25
-        self.table.setItem(self.mock_index, 3, QTableWidgetItem(f"{self.mock_progress}%"))
-        self.txt_log.appendPlainText(f"[Progress] Ingesting prompt #{self.mock_index + 1}: {self.mock_progress}%")
+        self.txt_log.appendPlainText(f"[Progress] Ingesting prompt #{active_job.index}: {self.mock_progress}%")
         
         if self.mock_progress >= 100:
-            self.table.setItem(self.mock_index, 2, QTableWidgetItem("Completed"))
+            active_job.status = JobStatus.COMPLETED
             self.mock_index += 1
             self.mock_progress = 0
             
@@ -496,10 +836,10 @@ class SnapGenAutomationWidget(QWidget):
         self.btn_pause.setEnabled(False)
         self.btn_stop.setEnabled(False)
         self.txt_log.appendPlainText("[Info] Batch stopped by user.")
-        for row in range(self.table.rowCount()):
-            status_item = self.table.item(row, 2)
-            if status_item and status_item.text() in ("Queued", "Processing"):
-                self.table.setItem(row, 2, QTableWidgetItem("Cancelled"))
+        for job in self.jobs:
+            if job.status in (JobStatus.PENDING, JobStatus.RUNNING):
+                job.status = JobStatus.CANCELLED
+        self._refresh_table()
 
 
 class OpenCutVideoEditorWidget(QWidget):
@@ -521,7 +861,11 @@ class OpenCutVideoEditorWidget(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         layout.addWidget(splitter)
 
-        # Left side: AI Video Director / Editor
+        # Left side: AI Video Director / Editor wrapped in QScrollArea
+        left_scroll = QScrollArea(self)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
         left = QGroupBox("AI-POWERED VIDEO EDITOR", self)
         left_lay = QVBoxLayout(left)
         
@@ -534,26 +878,26 @@ class OpenCutVideoEditorWidget(QWidget):
         file_row.addWidget(self.edit_video_path)
         file_row.addWidget(btn_browse)
         left_lay.addLayout(file_row)
-
+ 
         left_lay.addWidget(QLabel("AI Editing Instructions:", self))
         self.edit_instructions = QPlainTextEdit(self)
         self.edit_instructions.setPlaceholderText("Examples:\n- Cut out all silences and add zoom transitions.\n- Auto-crop video into vertical (9:16) framing focus on speakers.\n- Add burned-in animated subtitles and energetic edits.")
         left_lay.addWidget(self.edit_instructions)
-
+ 
         self.btn_process = QPushButton("🎬 Start AI-Powered Compilation", self)
         self.btn_process.setObjectName("primary")
         self.btn_process.clicked.connect(self._run_ai_edit)
         left_lay.addWidget(self.btn_process)
-
+ 
         self.progress_bar = QProgressBar(self)
         self.progress_bar.setVisible(False)
         left_lay.addWidget(self.progress_bar)
-
+ 
         self.txt_log = QPlainTextEdit(self)
         self.txt_log.setReadOnly(True)
         self.txt_log.setPlaceholderText("Console output log...")
         left_lay.addWidget(self.txt_log)
-
+ 
         # Help / Instructions buttons row (exactly matching Dola)
         help_row = QHBoxLayout()
         self.btn_instructions = QPushButton("Instructions", self)
@@ -567,8 +911,9 @@ class OpenCutVideoEditorWidget(QWidget):
         help_row.addWidget(self.btn_issues)
         help_row.addWidget(self.btn_upgrade)
         left_lay.addLayout(help_row)
-
-        splitter.addWidget(left)
+ 
+        left_scroll.setWidget(left)
+        splitter.addWidget(left_scroll)
 
         # Right side: Manual Timeline Editor Web Workspace
         right = QGroupBox("MANUAL TIMELINE VIDEO EDITOR (OPENCUT UI)", self)
@@ -658,14 +1003,23 @@ class AIVideoClipperWidget(QWidget):
         layout.setSpacing(15)
 
         # Subtitle
-        # Subtitle
         lbl_subtitle = QLabel("AI VIDEO CLIPPER — split long videos into high-energy short clips", self)
         lbl_subtitle.setObjectName("subtitle")
         lbl_subtitle.setFixedHeight(20)
         layout.addWidget(lbl_subtitle)
 
+        # Scroll Area for inputs
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(15)
+
         grid = QGridLayout()
-        layout.addLayout(grid)
+        scroll_layout.addLayout(grid)
 
         grid.addWidget(QLabel("Long Video File Path:", self), 0, 0)
         self.edit_video = QLineEdit(self)
@@ -696,16 +1050,16 @@ class AIVideoClipperWidget(QWidget):
         self.btn_run = QPushButton("⚡ Chop & Generate Short Clips", self)
         self.btn_run.setObjectName("primary")
         self.btn_run.clicked.connect(self._run_clipper)
-        layout.addWidget(self.btn_run)
+        scroll_layout.addWidget(self.btn_run)
 
         self.progress = QProgressBar(self)
         self.progress.setVisible(False)
-        layout.addWidget(self.progress)
+        scroll_layout.addWidget(self.progress)
 
         self.log_console = QPlainTextEdit(self)
         self.log_console.setReadOnly(True)
         self.log_console.setPlaceholderText("Clipper progress logs...")
-        layout.addWidget(self.log_console)
+        scroll_layout.addWidget(self.log_console)
 
         # Help / Instructions buttons row (exactly matching Dola)
         help_row = QHBoxLayout()
@@ -719,7 +1073,10 @@ class AIVideoClipperWidget(QWidget):
         help_row.addWidget(self.btn_instructions)
         help_row.addWidget(self.btn_issues)
         help_row.addWidget(self.btn_upgrade)
-        layout.addLayout(help_row)
+        scroll_layout.addLayout(help_row)
+
+        scroll.setWidget(scroll_widget)
+        layout.addWidget(scroll)
 
     def _browse_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select Long Video", "", "Video Files (*.mp4 *.mkv *.avi)")
