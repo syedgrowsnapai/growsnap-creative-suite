@@ -773,7 +773,7 @@ class MainWindow(QMainWindow):
 
         # Stacked Widget Page Setup
         self.stacked_widget = QStackedWidget(self)
-        right_layout.addWidget(self.stacked_widget)
+        right_layout.addWidget(self.stacked_widget, 1)
         root_layout.addWidget(right_panel)
 
         # ─── PAGE 1: DOLA VIDEO AUTOMATION ───────────────────
