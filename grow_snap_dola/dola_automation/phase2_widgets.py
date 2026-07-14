@@ -9,13 +9,14 @@ import threading
 import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict
+import requests
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QProcess, QUrl, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QProgressBar, QPlainTextEdit, QGroupBox, QGridLayout, QComboBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QFileDialog,
-    QAbstractItemView, QTabWidget, QSlider
+    QAbstractItemView, QTabWidget, QSlider, QCheckBox
 )
 from PyQt6.QtMultimedia import (
     QAudioInput, QMediaRecorder, QMediaCaptureSession, QMediaPlayer, QAudioOutput
@@ -74,13 +75,69 @@ class VoiceClonerWidget(QWidget):
         
         style_grid.addWidget(QLabel("Speech Style Presets:", self), 0, 0)
         self.combo_presets = QComboBox(self)
-        self.combo_presets.addItems(["Podcast Mode", "News Anchor", "Video Explainer", "UGC Accent", "Calm Bedtime Narrator"])
+        self.combo_presets.addItems([
+            "Marketing / Promotional",
+            "Operational / Instructions",
+            "Product Explainer",
+            "Sales Pitch",
+            "Storyteller / Drama",
+            "Podcast Mode",
+            "News Anchor",
+            "Video Explainer",
+            "UGC Accent",
+            "Calm Bedtime Narrator",
+            "Custom Settings..."
+        ])
+        self.combo_presets.setCurrentText("Marketing / Promotional")
+        self.combo_presets.currentTextChanged.connect(self._on_preset_changed)
         style_grid.addWidget(self.combo_presets, 0, 1)
 
         style_grid.addWidget(QLabel("Tone / Emotion:", self), 1, 0)
         self.combo_tone = QComboBox(self)
         self.combo_tone.addItems(["Neutral", "Excited / High Energy", "Warm / Caring", "Professional / Serious", "Whisper / Soft"])
         style_grid.addWidget(self.combo_tone, 1, 1)
+
+        # Custom Speed
+        style_grid.addWidget(QLabel("Custom Speed:", self), 2, 0)
+        self.slider_speed = QSlider(Qt.Orientation.Horizontal, self)
+        self.slider_speed.setRange(50, 200)
+        self.slider_speed.setValue(110)
+        self.lbl_speed_val = QLabel("1.10x", self)
+        self.slider_speed.valueChanged.connect(self._on_speed_changed)
+        speed_row = QHBoxLayout()
+        speed_row.addWidget(self.slider_speed)
+        speed_row.addWidget(self.lbl_speed_val)
+        style_grid.addLayout(speed_row, 2, 1)
+
+        # Custom Pitch
+        style_grid.addWidget(QLabel("Custom Pitch:", self), 3, 0)
+        self.slider_pitch = QSlider(Qt.Orientation.Horizontal, self)
+        self.slider_pitch.setRange(-10, 10)
+        self.slider_pitch.setValue(1)
+        self.lbl_pitch_val = QLabel("+1", self)
+        self.slider_pitch.valueChanged.connect(self._on_pitch_changed)
+        pitch_row = QHBoxLayout()
+        pitch_row.addWidget(self.slider_pitch)
+        pitch_row.addWidget(self.lbl_pitch_val)
+        style_grid.addLayout(pitch_row, 3, 1)
+
+        # Custom Energy
+        style_grid.addWidget(QLabel("Custom Energy:", self), 4, 0)
+        self.slider_energy = QSlider(Qt.Orientation.Horizontal, self)
+        self.slider_energy.setRange(50, 200)
+        self.slider_energy.setValue(120)
+        self.lbl_energy_val = QLabel("1.20x", self)
+        self.slider_energy.valueChanged.connect(self._on_energy_changed)
+        energy_row = QHBoxLayout()
+        energy_row.addWidget(self.slider_energy)
+        energy_row.addWidget(self.lbl_energy_val)
+        style_grid.addLayout(energy_row, 4, 1)
+
+        # Initialize sliders disabled by default unless custom is picked
+        self.slider_speed.setEnabled(False)
+        self.slider_pitch.setEnabled(False)
+        self.slider_energy.setEnabled(False)
+        self.combo_tone.setEnabled(False)
 
         left_layout.addWidget(style_group)
 
@@ -209,6 +266,44 @@ class VoiceClonerWidget(QWidget):
         # Connect player slot/signals for audio progress sliders
         self.media_player.positionChanged.connect(self._on_player_position_changed)
         self.media_player.durationChanged.connect(self._on_player_duration_changed)
+
+    def _on_speed_changed(self, val):
+        self.lbl_speed_val.setText(f"{val/100:.2f}x")
+
+    def _on_pitch_changed(self, val):
+        self.lbl_pitch_val.setText(f"{val:+d}" if val != 0 else "0")
+
+    def _on_energy_changed(self, val):
+        self.lbl_energy_val.setText(f"{val/100:.2f}x")
+
+    def _on_preset_changed(self, text):
+        preset_values = {
+            "Marketing / Promotional": (110, 1, 120, "Excited / High Energy"),
+            "Operational / Instructions": (95, 0, 100, "Professional / Serious"),
+            "Product Explainer": (100, 0, 110, "Warm / Caring"),
+            "Sales Pitch": (105, 1, 115, "Excited / High Energy"),
+            "Storyteller / Drama": (90, -1, 90, "Warm / Caring"),
+            "Podcast Mode": (100, 0, 100, "Neutral"),
+            "News Anchor": (105, 0, 100, "Professional / Serious"),
+            "Video Explainer": (100, 0, 100, "Neutral"),
+            "UGC Accent": (105, 1, 110, "Neutral"),
+            "Calm Bedtime Narrator": (85, -2, 70, "Whisper / Soft")
+        }
+        
+        is_custom = (text == "Custom Settings...")
+        self.slider_speed.setEnabled(is_custom)
+        self.slider_pitch.setEnabled(is_custom)
+        self.slider_energy.setEnabled(is_custom)
+        self.combo_tone.setEnabled(is_custom)
+        
+        if text in preset_values:
+            speed, pitch, energy, tone = preset_values[text]
+            self.slider_speed.setValue(speed)
+            self.slider_pitch.setValue(pitch)
+            self.slider_energy.setValue(energy)
+            idx = self.combo_tone.findText(tone)
+            if idx >= 0:
+                self.combo_tone.setCurrentIndex(idx)
 
     def _toggle_recording(self):
         if not self.is_recording:
@@ -674,7 +769,20 @@ class ScriptToVideoAgentWidget(QWidget):
         self.edit_prompt = QPlainTextEdit(self)
         self.edit_prompt.setPlaceholderText("Write the general concept (e.g. 'History of the Roman Empire in amber tones' or 'Top 3 bedtime hacks for parents')...")
         self.edit_prompt.setPlainText("The legend of the ancient tortoise who knew the night's secrets. Bedtime style.")
-        grid.addWidget(self.edit_prompt, 0, 1)
+        grid.addWidget(self.edit_prompt, 0, 1, 1, 3)
+
+        grid.addWidget(QLabel("Visual Model:", self), 1, 0)
+        self.combo_visual_model = QComboBox(self)
+        self.combo_visual_model.addItems(["Dola (SeaDance 2.0)", "SnapGen (Google Veo 3)", "LTX-Video (Local)", "WAN 2.1 (Local)"])
+        grid.addWidget(self.combo_visual_model, 1, 1)
+
+        self.chk_native_audio = QCheckBox("Use Native Model Audio", self)
+        self.chk_native_audio.setChecked(True)
+        grid.addWidget(self.chk_native_audio, 1, 2)
+
+        self.chk_separate_voice = QCheckBox("Generate Voiceover Separately", self)
+        self.chk_separate_voice.setChecked(False)
+        grid.addWidget(self.chk_separate_voice, 1, 3)
 
         left_layout.addWidget(form_group)
 
@@ -736,30 +844,54 @@ class ScriptToVideoAgentWidget(QWidget):
             QMessageBox.warning(self, "No Prompt", "Please enter a video topic prompt.")
             return
 
-        self.log_screen.appendPlainText("[Agent] Brainstorming outline and script scenes using local AI...")
+        self.log_screen.appendPlainText("[Agent] Brainstorming outline and script scenes using local AI (Odysseus)...")
         self.btn_brainstorm.setEnabled(False)
-        self.progress_bar.setValue(30)
+        self.progress_bar.setValue(20)
         
-        # Simulate local script generation
-        QTimer.singleShot(2500, self._on_script_brainstormed)
+        def run_api_query():
+            simulated_script = (
+                "SCENE 1:\n"
+                "Visual: A giant ancient tortoise slowly walking on a grassy hill under a golden sunset.\n"
+                "Narration: Long ago, on a quiet hill, lived a tortoise who had seen a thousand nights.\n\n"
+                "SCENE 2:\n"
+                "Visual: Bedside lamp illuminating a kids room, starry sky outside window.\n"
+                "Narration: Each night, he would tell the forest animals stories that brought deep, peaceful rest.\n\n"
+                "SCENE 3:\n"
+                "Visual: Golden Lamplight bedside lamp, parent soft whispering to toddler.\n"
+                "Narration: And now, that same ancient tortoise has a message for you: sleep is sweet, and you are safe."
+            )
+            try:
+                url = "http://localhost:7000/api/chat"
+                payload = {
+                    "model": "llama3",
+                    "messages": [
+                        {"role": "system", "content": "You are a professional storyboard writer. Output a video script divided into scenes. For each scene, specify 'Visual: [description]' and 'Narration: [voiceover script]'. Keep it clean and follow format."},
+                        {"role": "user", "content": f"Create a 3-scene storyboard for a video about: {prompt}"}
+                    ],
+                    "stream": False
+                }
+                response = requests.post(url, json=payload, timeout=8)
+                if response.status_code == 200:
+                    data = response.json()
+                    storyboard = data.get("message", {}).get("content", "").strip()
+                    if storyboard:
+                        return storyboard
+            except Exception as e:
+                logger.info(f"Odysseus API connection fallback to default: {e}")
+            
+            return simulated_script
 
-    def _on_script_brainstormed(self):
+        def thread_target():
+            result = run_api_query()
+            QTimer.singleShot(0, lambda: self._on_script_brainstormed_with_data(result))
+
+        threading.Thread(target=thread_target, daemon=True).start()
+
+    def _on_script_brainstormed_with_data(self, storyboard_data):
         self.btn_brainstorm.setEnabled(True)
         self.btn_assemble.setEnabled(True)
         self.progress_bar.setValue(60)
-        
-        simulated_script = (
-            "SCENE 1:\n"
-            "Visual: A giant ancient tortoise slowly walking on a grassy hill under a golden sunset.\n"
-            "Narration: Long ago, on a quiet hill, lived a tortoise who had seen a thousand nights.\n\n"
-            "SCENE 2:\n"
-            "Visual: Bedside lamp illuminating a kids room, starry sky outside window.\n"
-            "Narration: Each night, he would tell the forest animals stories that brought deep, peaceful rest.\n\n"
-            "SCENE 3:\n"
-            "Visual: Golden Lamplight bedside lamp, parent soft whispering to toddler.\n"
-            "Narration: And now, that same ancient tortoise has a message for you: sleep is sweet, and you are safe."
-        )
-        self.script_editor.setPlainText(simulated_script)
+        self.script_editor.setPlainText(storyboard_data)
         self.log_screen.appendPlainText("[Agent] Storyboard outline ready! Review the scripts in Section 2, modify as needed, then click 'Approve & Assemble'.")
 
     def _assemble_video(self):

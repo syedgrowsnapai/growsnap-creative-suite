@@ -65,12 +65,12 @@ class UpdateDownloader(QThread):
 
     def run(self):
         try:
-            # Generate a secure file path in the temp directory
             temp_dir = Path(tempfile.gettempdir())
-            # Sanitize output filename to prevent path traversal
-            output_path = temp_dir / "growsnap_setup_latest.exe"
+            if ".zip" in self.download_url.lower():
+                output_path = temp_dir / "growsnap_update.zip"
+            else:
+                output_path = temp_dir / "growsnap_setup_latest.exe"
             
-            # Prepare request
             req = urllib.request.Request(
                 self.download_url,
                 headers={'User-Agent': 'Mozilla/5.0 GrowSnapUpdateEngine/1.0'}
@@ -110,18 +110,54 @@ class UpdateDownloader(QThread):
 
 def launch_installer(installer_path: str) -> bool:
     """
-    Launches the downloaded installer and terminates the current Python app.
+    Launches the downloaded installer/ZIP updater and terminates the current Python app.
     """
     try:
-        # Standard launch on Windows
         if os.name == 'nt':
-            os.startfile(installer_path)
-            return True
+            if installer_path.endswith('.zip'):
+                temp_dir = Path(tempfile.gettempdir())
+                helper_bat = temp_dir / "growsnap_update_helper.bat"
+                app_dir = Path(__file__).resolve().parent.parent.parent
+                
+                # Dynamically extract root folder inside zip
+                import zipfile
+                root_folder = "growsnap-creative-suite-main"
+                try:
+                    with zipfile.ZipFile(installer_path, 'r') as zip_ref:
+                        first_item = zip_ref.namelist()[0]
+                        root_folder = first_item.split('/')[0]
+                except Exception:
+                    pass
+                
+                bat_content = f"""@echo off
+timeout /t 2 /nobreak >nul
+echo Performing automatic update...
+powershell -Command "Expand-Archive -Path '{installer_path}' -DestinationPath '{temp_dir}\\growsnap_extracted' -Force"
+xcopy /E /Y /I "{temp_dir}\\growsnap_extracted\\{root_folder}\\*" "{app_dir}\\"
+rd /S /Q "{temp_dir}\\growsnap_extracted"
+del "{installer_path}"
+echo Update applied! Restarting application...
+cd /d "{app_dir}"
+start run_grow_snap.bat
+del "%~f0"
+"""
+                with open(helper_bat, 'w', encoding='utf-8') as f:
+                    f.write(bat_content)
+                
+                os.startfile(str(helper_bat))
+                sys.exit(0)
+            else:
+                os.startfile(installer_path)
+                return True
         else:
-            # Linux/macOS fallback
-            subprocess.Popen(["chmod", "+x", installer_path])
-            subprocess.Popen([installer_path], shell=True)
-            return True
+            if installer_path.endswith('.zip'):
+                app_dir = Path(__file__).resolve().parent.parent.parent
+                subprocess.Popen(f"unzip -o '{installer_path}' -d '{app_dir}'", shell=True)
+                return True
+            else:
+                subprocess.Popen(["chmod", "+x", installer_path])
+                subprocess.Popen([installer_path], shell=True)
+                return True
     except Exception as e:
         print(f"[Updater] Error launching installer: {e}", file=sys.stderr)
         return False

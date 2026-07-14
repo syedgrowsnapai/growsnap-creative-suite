@@ -17,7 +17,8 @@ from PyQt6.QtWidgets import (
     QFrame, QProgressBar, QTableWidget, QTableWidgetItem, QCheckBox, QSpinBox, QComboBox,
     QFileDialog, QMessageBox, QTabWidget, QSplitter, QListWidget, QListWidgetItem,
     QLineEdit, QPlainTextEdit, QGroupBox, QAbstractItemView, QHeaderView, QMenu, QDialog,
-    QApplication, QSystemTrayIcon, QButtonGroup, QStackedWidget, QStylePainter, QStyleOptionComboBox, QStyle
+    QApplication, QSystemTrayIcon, QButtonGroup, QStackedWidget, QStylePainter, QStyleOptionComboBox, QStyle,
+    QInputDialog
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot, QTimer, QTime, QElapsedTimer, QPoint, QEvent
 from PyQt6.QtGui import QColor, QCursor, QAction, QKeySequence, QShortcut, QIcon, QPalette, QStandardItemModel, QStandardItem
@@ -124,6 +125,7 @@ class BatchRunner(QThread):
     chat_created = pyqtSignal(int, str)  # job_index, chat_url
     job_finished = pyqtSignal(int, bool, str, str)  # job_index, success, download_path, error
     batch_finished = pyqtSignal()
+    profile_rotated = pyqtSignal(str)
 
     def __init__(self, jobs: List[PromptJob], settings: AutomationSettings, db: HistoryDatabase, session_id: int, mode: str = "full"):
         super().__init__()
@@ -281,6 +283,26 @@ class BatchRunner(QThread):
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"Error executing job #{job.index} (attempt {retries+1}): {e}", exc_info=True)
+                
+            if not success and thread_settings.auto_rotate_profiles:
+                lower_err = error_msg.lower()
+                if "limit exceeded" in lower_err or "quota reached" in lower_err or "out of credits" in lower_err or "points" in lower_err or "country switch" in lower_err:
+                    profiles = []
+                    if thread_settings.profile_list_str:
+                        profiles = [p.strip() for p in thread_settings.profile_list_str.split(',') if p.strip()]
+                    if not profiles:
+                        profiles_dir = Path.home() / 'Documents' / 'dola_video_automation' / 'profiles'
+                        if profiles_dir.exists():
+                            profiles = sorted([d.name for d in profiles_dir.iterdir() if d.is_dir()])
+                    
+                    if profiles and thread_settings.active_profile_name in profiles:
+                        curr_idx = profiles.index(thread_settings.active_profile_name)
+                        next_idx = (curr_idx + 1) % len(profiles)
+                        next_profile = profiles[next_idx]
+                        logger.info(f"Credit Limit Hit! Auto-rotating Dola profile: {thread_settings.active_profile_name} -> {next_profile}")
+                        thread_settings.active_profile_name = next_profile
+                        self.profile_rotated.emit(next_profile)
+                        self.job_progress.emit(job.index, f"Quota exceeded. Auto-rotated to profile: {next_profile}")
                 
             retries += 1
             if retries < max_retries and not self._stop:
@@ -469,6 +491,7 @@ class MainWindow(QMainWindow):
         self.batch_timer = QTimer(self)
         self.batch_timer.timeout.connect(self._update_batch_timer)
         self.batch_start_time = QElapsedTimer()
+        self.shown_popups = {}
 
         self._build_ui()
         self.table.itemChanged.connect(self._on_table_item_changed)
@@ -482,6 +505,7 @@ class MainWindow(QMainWindow):
         self.shortcut_refresh = QShortcut(QKeySequence("F5"), self)
         self.shortcut_refresh.activated.connect(self._refresh_application)
         self._load_json_backup()
+        self._refresh_profile_list()
         self._enforce_license_limits()
         self._refresh_history()
         self._refresh_lifetime_history()
@@ -607,8 +631,29 @@ class MainWindow(QMainWindow):
         self.btn_nav_script_to_video.setCheckable(True)
         self.btn_nav_script_to_video.setObjectName("sub_nav_button")
 
+        self.btn_nav_snapgen = QPushButton("SnapGen AI", self)
+        self.btn_nav_snapgen.setCheckable(True)
+        self.btn_nav_snapgen.setObjectName("sub_nav_button")
+
+        self.btn_nav_opencut = QPushButton("Video Editor", self)
+        self.btn_nav_opencut.setCheckable(True)
+        self.btn_nav_opencut.setObjectName("sub_nav_button")
+
+        self.btn_nav_clipper = QPushButton("AI Video Clipper", self)
+        self.btn_nav_clipper.setCheckable(True)
+        self.btn_nav_clipper.setObjectName("sub_nav_button")
+
+        self.btn_nav_showcase = QPushButton("Showcase & Prompts", self)
+        self.btn_nav_showcase.setCheckable(True)
+        self.btn_nav_showcase.setObjectName("sub_nav_button")
+
+        self.btn_nav_sandbox = QPushButton("AI Models Sandbox", self)
+        self.btn_nav_sandbox.setCheckable(True)
+        self.btn_nav_sandbox.setObjectName("sub_nav_button")
+
         panel_creative_layout.addWidget(self.btn_nav_platform_automator)
         panel_creative_layout.addWidget(self.btn_nav_dola)
+        panel_creative_layout.addWidget(self.btn_nav_snapgen)
         panel_creative_layout.addWidget(self.btn_nav_converter)
         panel_creative_layout.addWidget(self.btn_nav_merger)
         panel_creative_layout.addWidget(self.btn_nav_hook_factory)
@@ -616,6 +661,10 @@ class MainWindow(QMainWindow):
         panel_creative_layout.addWidget(self.btn_nav_hook_library)
         panel_creative_layout.addWidget(self.btn_nav_voice_cloner)
         panel_creative_layout.addWidget(self.btn_nav_script_to_video)
+        panel_creative_layout.addWidget(self.btn_nav_opencut)
+        panel_creative_layout.addWidget(self.btn_nav_clipper)
+        panel_creative_layout.addWidget(self.btn_nav_showcase)
+        panel_creative_layout.addWidget(self.btn_nav_sandbox)
         sidebar_layout.addWidget(self.panel_creative)
 
         # Accordion: ReachSnap
@@ -715,6 +764,11 @@ class MainWindow(QMainWindow):
         self.nav_group.addButton(self.btn_nav_voice_cloner, 13)
         self.nav_group.addButton(self.btn_nav_gmaps_scraper, 14)
         self.nav_group.addButton(self.btn_nav_script_to_video, 15)
+        self.nav_group.addButton(self.btn_nav_snapgen, 16)
+        self.nav_group.addButton(self.btn_nav_opencut, 17)
+        self.nav_group.addButton(self.btn_nav_clipper, 18)
+        self.nav_group.addButton(self.btn_nav_showcase, 19)
+        self.nav_group.addButton(self.btn_nav_sandbox, 20)
         self.nav_group.idClicked.connect(self._on_nav_changed)
 
         # Stacked Widget Page Setup
@@ -956,6 +1010,31 @@ class MainWindow(QMainWindow):
         self.combo_select_hook = QComboBox(self)
         self.combo_select_hook.currentIndexChanged.connect(self._update_runner_settings)
         settings_grid.addWidget(self.combo_select_hook, 11, 3)
+        # Dola Profile settings UI group
+        profile_group = QGroupBox("DOLA PROFILE ROTATION MANAGER", self)
+        profile_layout = QGridLayout(profile_group)
+        profile_layout.setSpacing(10)
+
+        profile_layout.addWidget(QLabel("Active Profile:", self), 0, 0)
+        self.combo_profiles = QComboBox(self)
+        self.combo_profiles.setMinimumWidth(150)
+        self.combo_profiles.currentTextChanged.connect(self._on_profile_changed)
+        profile_layout.addWidget(self.combo_profiles, 0, 1)
+
+        self.btn_new_profile = QPushButton("Create Profile", self)
+        self.btn_new_profile.clicked.connect(self._create_new_profile)
+        profile_layout.addWidget(self.btn_new_profile, 0, 2)
+
+        self.btn_manual_login = QPushButton("🔑 Manual Login (headed)", self)
+        self.btn_manual_login.clicked.connect(self._launch_manual_login)
+        profile_layout.addWidget(self.btn_manual_login, 0, 3)
+
+        self.chk_auto_rotate = QCheckBox("Auto-rotate profiles on out of credits", self)
+        self.chk_auto_rotate.setChecked(False)
+        self.chk_auto_rotate.stateChanged.connect(self._update_runner_settings)
+        profile_layout.addWidget(self.chk_auto_rotate, 1, 0, 1, 4)
+        
+        self.profile_group = profile_group
 
         # Operational buttons
         run_row = QHBoxLayout()
@@ -1118,6 +1197,7 @@ class MainWindow(QMainWindow):
         tab_settings_tab = QWidget(self)
         tab_settings_layout = QVBoxLayout(tab_settings_tab)
         tab_settings_layout.addWidget(settings_group)
+        tab_settings_layout.addWidget(self.profile_group)
         tab_settings_layout.addStretch()
         right.addTab(tab_settings_tab, "Settings")
 
@@ -1461,6 +1541,22 @@ class MainWindow(QMainWindow):
         self.stacked_widget.addWidget(self.page_gmaps_scraper)        # Index 14
         self.stacked_widget.addWidget(self.page_script_to_video)       # Index 15
 
+        from dola_automation.new_tabs import (
+            SnapGenAutomationWidget, OpenCutVideoEditorWidget, AIVideoClipperWidget,
+            CommunityShowcaseWidget, AIModelsSandboxWidget
+        )
+        self.page_snapgen = SnapGenAutomationWidget(self, self.db_path, self.settings)
+        self.page_opencut = OpenCutVideoEditorWidget(self, self.db_path, self.settings)
+        self.page_clipper = AIVideoClipperWidget(self, self.db_path, self.settings)
+        self.page_showcase = CommunityShowcaseWidget(self, self.db_path, self.settings)
+        self.page_sandbox = AIModelsSandboxWidget(self, self.db_path, self.settings)
+
+        self.stacked_widget.addWidget(self.page_snapgen)             # Index 16
+        self.stacked_widget.addWidget(self.page_opencut)             # Index 17
+        self.stacked_widget.addWidget(self.page_clipper)             # Index 18
+        self.stacked_widget.addWidget(self.page_showcase)            # Index 19
+        self.stacked_widget.addWidget(self.page_sandbox)             # Index 20
+
     def _on_nav_changed(self, button_id):
         self.stacked_widget.setCurrentIndex(button_id)
         
@@ -1479,8 +1575,12 @@ class MainWindow(QMainWindow):
             11: "CreativeSnap Dashboard",
             12: "ReachSnap Dashboard",
             13: "Voice Cloner & TTS Engine",
-            14: "Google Maps Leads Scraper",
-            15: "Autonomous Script-to-Video Agent"
+            15: "Autonomous Script-to-Video Agent",
+            16: "SnapGen Video and Image Automation",
+            17: "OpenCut Video Editor",
+            18: "AI Video Clipper",
+            19: "Community Showcase & Prompts",
+            20: "AI Models Sandbox"
         }
         if hasattr(self, 'title_lbl'):
             self.title_lbl.setText(titles.get(button_id, "GrowSnap One"))
@@ -1495,6 +1595,11 @@ class MainWindow(QMainWindow):
             btn = self.nav_group.button(button_id)
             if btn:
                 btn.setChecked(True)
+
+        # Trigger tool-specific instructions popups for first-time use
+        if button_id in [16, 17, 18, 19, 20] and button_id not in self.shown_popups:
+            self.shown_popups[button_id] = True
+            QTimer.singleShot(100, lambda: self._show_tool_popup_guide(button_id))
 
     def _on_load_url_to_downloader(self, url: str):
         # Switch to Viral Hook Factory (page index 4)
@@ -1559,6 +1664,8 @@ class MainWindow(QMainWindow):
         s.generation_success_phrase = self.edit_success_phrase.text()
         s.prepend_viral_hook = self.chk_prepend_hook.isChecked()
         s.selected_hook_id = self.combo_select_hook.currentData() or -1
+        s.active_profile_name = self.combo_profiles.currentText() or 'Default'
+        s.auto_rotate_profiles = self.chk_auto_rotate.isChecked()
         
         # Coordinates from right page spinboxes and preset from combo
         s.watermark_blur_x = self.spin_blur_x.value()
@@ -1590,6 +1697,8 @@ class MainWindow(QMainWindow):
         self.settings.selected_hook_id = s.selected_hook_id
         self.settings.watermark_method = s.watermark_method
         self.settings.download_dir = s.download_dir
+        self.settings.active_profile_name = s.active_profile_name
+        self.settings.auto_rotate_profiles = s.auto_rotate_profiles
         
         if self.runner and self.runner.isRunning():
             self.runner.settings = self.settings
@@ -1762,7 +1871,9 @@ class MainWindow(QMainWindow):
                 'watermark_blur_h': self.spin_blur_h.value(),
                 'watermark_crop_pixels': self.spin_crop_px.value(),
                 'download_dir': str(self.download_dir),
-                'generation_success_phrase': self.edit_success_phrase.text()
+                'generation_success_phrase': self.edit_success_phrase.text(),
+                'active_profile_name': self.combo_profiles.currentText() or 'Default',
+                'auto_rotate_profiles': self.chk_auto_rotate.isChecked()
             }
             with open(self.backup_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4)
@@ -1823,11 +1934,93 @@ class MainWindow(QMainWindow):
                 self.download_dir = Path(d_dir)
                 self.lbl_download_dir_show.setText(self.download_dir.name)
             
+            self.chk_auto_rotate.setChecked(data.get('auto_rotate_profiles', False))
+            
             self.settings = self._collect_settings()
+            self.settings.active_profile_name = data.get('active_profile_name', 'Default')
         except Exception as e:
             logger.warning(f"Failed to load backup: {e}")
         finally:
             self._is_loading_backup = False
+
+    def _refresh_profile_list(self):
+        profiles_dir = Path.home() / 'Documents' / 'dola_video_automation' / 'profiles'
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        default_dir = profiles_dir / 'Default'
+        default_dir.mkdir(exist_ok=True)
+        
+        profiles = []
+        for p in profiles_dir.iterdir():
+            if p.is_dir():
+                profiles.append(p.name)
+        
+        self.combo_profiles.blockSignals(True)
+        self.combo_profiles.clear()
+        self.combo_profiles.addItems(sorted(profiles))
+        
+        active = getattr(self.settings, 'active_profile_name', 'Default')
+        if active in profiles:
+            self.combo_profiles.setCurrentText(active)
+        else:
+            self.combo_profiles.setCurrentText('Default')
+        self.combo_profiles.blockSignals(False)
+
+    def _on_profile_changed(self, text):
+        if not text:
+            return
+        self.settings.active_profile_name = text
+        self._save_json_backup()
+        self._log(f"Switched active Dola profile to: {text}")
+
+    def _create_new_profile(self):
+        name, ok = QInputDialog.getText(self, "Create Profile", "Enter new profile name:")
+        if ok and name.strip():
+            clean_name = "".join([c for c in name if c.isalnum() or c in (' ', '_', '-')]).strip()
+            if not clean_name:
+                QMessageBox.warning(self, "Error", "Invalid profile name.")
+                return
+            profiles_dir = Path.home() / 'Documents' / 'dola_video_automation' / 'profiles'
+            new_profile_dir = profiles_dir / clean_name
+            new_profile_dir.mkdir(parents=True, exist_ok=True)
+            self._refresh_profile_list()
+            self.combo_profiles.setCurrentText(clean_name)
+            self._log(f"Created new Dola profile: {clean_name}")
+
+    def _launch_manual_login(self):
+        profile = self.combo_profiles.currentText()
+        if not profile:
+            QMessageBox.warning(self, "Warning", "Please select or create a profile first.")
+            return
+        
+        profile_dir = Path.home() / 'Documents' / 'dola_video_automation' / 'profiles' / profile
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        
+        QMessageBox.information(
+            self, 
+            "Manual Login", 
+            f"A headed browser will now open using profile '{profile}'.\n\n"
+            "Please log in to Dola in the browser window, then close the browser to save your session."
+        )
+        
+        def run_headed_browser():
+            try:
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as p:
+                    launch_args = ["--disable-blink-features=AutomationControlled"]
+                    context = p.chromium.launch_persistent_context(
+                        user_data_dir=str(profile_dir),
+                        headless=False,
+                        args=launch_args,
+                        viewport={"width": 1280, "height": 800}
+                    )
+                    page = context.pages[0] if context.pages else context.new_page()
+                    page.goto("https://dola.com")
+                    while len(context.pages) > 0:
+                        time.sleep(0.5)
+            except Exception as e:
+                logger.error(f"Error launching headed browser: {e}")
+                
+        threading.Thread(target=run_headed_browser, daemon=True).start()
 
     # file picking & image mapping
     def _pick_download_dir(self):
@@ -2272,6 +2465,7 @@ class MainWindow(QMainWindow):
         self.runner.chat_created.connect(self._on_chat_created)
         self.runner.job_finished.connect(self._on_job_finished)
         self.runner.batch_finished.connect(self._on_batch_finished)
+        self.runner.profile_rotated.connect(self._on_profile_rotated)
         self.runner.start()
         self._send_notification("Batch Started", f"Processing {len(self.jobs)} jobs...")
 
@@ -2294,6 +2488,12 @@ class MainWindow(QMainWindow):
         elapsed = self.batch_start_time.elapsed()
         t = QTime(0, 0, 0).addMSecs(elapsed)
         self.timer_label.setText(t.toString("HH:mm:ss"))
+
+    @pyqtSlot(str)
+    def _on_profile_rotated(self, next_profile):
+        self._log(f"[Auto-Rotation] Switching active Dola profile to: {next_profile}")
+        self.combo_profiles.setCurrentText(next_profile)
+        self.settings.active_profile_name = next_profile
 
     @pyqtSlot(int, str)
     def _on_job_progress(self, job_index: int, message: str):
@@ -3625,6 +3825,59 @@ class MainWindow(QMainWindow):
                     subprocess.run(['xdg-open', p])
             except Exception as e:
                 QMessageBox.warning(self, "Folder Error", f"Could not open folder: {e}")
+
+    def _show_tool_popup_guide(self, button_id):
+        guides = {
+            16: (
+                "SnapGen Video Automation Guide",
+                "Use Google Veo 3 and Nano Banana Pro/2 to generate high-fidelity 8-second clips and premium images.\n\n"
+                "Instructions:\n"
+                "1. Input your prompts manually in the Prompt Ingestion editor or browse to load a CSV/TXT file.\n"
+                "2. Choose your preferred profile from the Active Profile selector.\n"
+                "3. Click 'Login' to authenticate and store your persistent session folder.\n"
+                "4. Select the video/image model, duration, and aspect ratio.\n"
+                "5. Click 'Start Batch' to begin concurrent processing."
+            ),
+            17: (
+                "OpenCut Video Editor Guide",
+                "AI-Powered & Manual Video Timeline Editor.\n\n"
+                "Instructions:\n"
+                "1. Browse and select your raw input video file path.\n"
+                "2. Provide plain-text AI instructions (e.g., 'Cut out all silences, zoom in on faces, and apply 9:16 portrait crop').\n"
+                "3. Click 'Start AI-Powered Compilation' to trigger automated editing.\n"
+                "4. Use the manual timeline tracks at the bottom to adjust or preview custom cuts."
+            ),
+            18: (
+                "AI Video Clipper Guide",
+                "Chop long-form (1-3 hours) videos into vertical TikTok/Reels clips.\n\n"
+                "Instructions:\n"
+                "1. Browse and select your raw long video file.\n"
+                "2. Input target number of clips and output style/theme.\n"
+                "3. Enable burn-in animated subtitles if desired.\n"
+                "4. Click 'Chop & Generate' to start slicing."
+            ),
+            19: (
+                "Community Showcase & Templates Guide",
+                "Explore trending prompts and copy templates directly to your clipboard.\n\n"
+                "Instructions:\n"
+                "1. Browse the gallery of community creations in the visual feed.\n"
+                "2. Click any showcase item or prompt template card to copy the prompt or send it directly to the generator pipeline."
+            ),
+            20: (
+                "AI Models Sandbox Guide",
+                "Connect to locally hosted models (LTX-Video, WAN 2.7, SkyReels ComfyUI) completely offline.\n\n"
+                "Instructions & Offline Setup:\n"
+                "1. Start your local inference server (e.g. ComfyUI or local REST API backend).\n"
+                "2. Set the correct API Server Endpoint URL and port for the models.\n"
+                "3. Click 'Verify Connection' or 'Test Connection' to verify if local GrowSnap is linked with your GPU.\n\n"
+                "💡 Why use this?\n"
+                "Linking local offline models allows you to run unlimited free generations on your own graphics card (GPU) without needing an internet connection or using any credits!"
+            )
+        }
+        
+        if button_id in guides:
+            title, text = guides[button_id]
+            QMessageBox.information(self, title, text)
 
     def closeEvent(self, event):
         self._save_json_backup()

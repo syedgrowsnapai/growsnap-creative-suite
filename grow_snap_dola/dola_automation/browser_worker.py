@@ -121,6 +121,11 @@ class DolaBrowserWorker:
         self._cancelled = True
         self.log_info("Worker Cancelled.")
         try:
+            if hasattr(self, '_context') and self._context:
+                self._context.close()
+        except Exception:
+            pass
+        try:
             if hasattr(self, '_browser') and self._browser:
                 self._browser.close()
         except Exception:
@@ -141,9 +146,13 @@ class DolaBrowserWorker:
         mode_label = "headed" if not self.settings.headless else "headless"
         self.log_info(f"Job #{job.index}: Starting Playwright execution in {mode_label} mode.")
         
-        # Determine job-specific session path
-        session_path = self._get_job_session_path(job.index)
+        # Determine profile directory path
+        profile_name = getattr(self.settings, 'active_profile_name', 'Default')
+        profile_dir = Path.home() / 'Documents' / 'dola_video_automation' / 'profiles' / profile_name
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        self.log_info(f"Using persistent browser profile: {profile_name} at {profile_dir}")
         
+        session_path = self._get_job_session_path(job.index)
         success = False
         
         with sync_playwright() as p:
@@ -152,38 +161,26 @@ class DolaBrowserWorker:
                 launch_args.extend(["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
             if not self.settings.headless:
                 launch_args.append("--disable-blink-features=AutomationControlled")
-                
-            browser = p.chromium.launch(
-                headless=self.settings.headless,
-                args=launch_args
-            )
-            self._browser = browser
             
-            # Setup context storage state
-            context_kwargs = {
-                "viewport": {"width": 1280, "height": 800}
-            }
+            try:
+                context = p.chromium.launch_persistent_context(
+                    user_data_dir=str(profile_dir),
+                    headless=self.settings.headless,
+                    viewport={"width": 1280, "height": 800},
+                    args=launch_args
+                )
+                self._context = context
+            except Exception as e:
+                self.log_info(f"Failed to launch persistent context: {e}")
+                raise e
             
-            if mode == "download_only":
-                # Load job-specific session state so that the browser loads the identical chat session
-                if session_path.exists():
-                    context_kwargs["storage_state"] = str(session_path)
-                    self.log_info(f"Loading job-specific session state from {session_path}")
-                elif self.settings.auth_state_path.exists():
-                    context_kwargs["storage_state"] = str(self.settings.auth_state_path)
-                    self.log_info("Fallback: Loading global session state.")
-                else:
-                    self.log_info("Warning: No session state file found for download mode.")
+            # Persistent context opens at least one page automatically
+            if context.pages:
+                page = context.pages[0]
             else:
-                # Submission mode
-                if self.settings.auth_state_path.exists():
-                    context_kwargs["storage_state"] = str(self.settings.auth_state_path)
-                    self.log_info("Loading global session state to preserve Dola login session.")
-                else:
-                    self.log_info(f"Job #{job.index}: Clean browser session initialized (no shared cookies).")
+                page = context.new_page()
                 
-            context = browser.new_context(**context_kwargs)
-            context.set_default_timeout(30000)
+            page.set_default_navigation_timeout(60000)
             
             # Listen to MP4 files passing in traffic
             def intercept_response(response: Response):
@@ -192,9 +189,6 @@ class DolaBrowserWorker:
                     self._intercepted_mp4_urls.add(url)
                     
             context.on("response", intercept_response)
-            
-            page = context.new_page()
-            page.set_default_navigation_timeout(60000)
             
             # Setup anti-popup interceptors
             self._setup_popup_handlers(page)
@@ -222,10 +216,6 @@ class DolaBrowserWorker:
             finally:
                 try:
                     context.close()
-                except Exception:
-                    pass
-                try:
-                    browser.close()
                 except Exception:
                     pass
                 
