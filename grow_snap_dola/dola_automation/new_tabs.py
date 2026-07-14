@@ -10,9 +10,9 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
     QProgressBar, QTableWidget, QTableWidgetItem, QCheckBox, QSpinBox, QComboBox,
     QFileDialog, QMessageBox, QSplitter, QListWidget, QListWidgetItem, QLineEdit, QPlainTextEdit,
-    QGroupBox, QHeaderView, QAbstractItemView, QFrame
+    QGroupBox, QHeaderView, QAbstractItemView, QFrame, QButtonGroup, QTabWidget
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot, QTimer
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, pyqtSlot, QTimer, QTime
 from PyQt6.QtGui import QColor, QIcon
 
 # Check if QWebEngineView is available
@@ -46,6 +46,14 @@ class SnapGenAutomationWidget(QWidget):
         return card
 
     def _init_ui(self):
+        self.gen_mode = "video" # default mode
+        self.is_paused = False
+        self.is_running = False
+        
+        self.elapsed_seconds = 0
+        self.batch_timer = QTimer(self)
+        self.batch_timer.timeout.connect(self._update_timer)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(15)
@@ -81,16 +89,41 @@ class SnapGenAutomationWidget(QWidget):
         stats_row.addWidget(self.stat_total)
         stats_row.addWidget(self.stat_fail)
         stats_row.addWidget(timer_card)
-        layout.addLayout(stats_row)
+        
+        # Add stats row with 0 stretch factor to prevent vertical stretching
+        layout.addLayout(stats_row, 0)
 
-        # Splitter Layout
+        # Splitter Layout (takes stretch factor 1)
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        layout.addWidget(splitter)
+        layout.addWidget(splitter, 1)
 
-        # Left panel: Inputs
+        # Left panel: Inputs & Controls
         left = QWidget(self)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(15)
+        
+        # Mode Selection
+        mode_group = QGroupBox("GENERATION MODE", self)
+        mode_lay = QHBoxLayout(mode_group)
+        
+        self.btn_mode_video = QPushButton("🎬 Generate Video", self)
+        self.btn_mode_video.setCheckable(True)
+        self.btn_mode_video.setChecked(True)
+        self.btn_mode_video.clicked.connect(self._select_video_mode)
+        
+        self.btn_mode_image = QPushButton("🖼️ Generate Image", self)
+        self.btn_mode_image.setCheckable(True)
+        self.btn_mode_image.clicked.connect(self._select_image_mode)
+        
+        self.mode_btn_group = QButtonGroup(self)
+        self.mode_btn_group.setExclusive(True)
+        self.mode_btn_group.addButton(self.btn_mode_video)
+        self.mode_btn_group.addButton(self.btn_mode_image)
+        
+        mode_lay.addWidget(self.btn_mode_video)
+        mode_lay.addWidget(self.btn_mode_image)
+        left_layout.addWidget(mode_group)
         
         # Prompt Ingestion
         ingest_group = QGroupBox("PROMPT INGESTION", self)
@@ -109,62 +142,23 @@ class SnapGenAutomationWidget(QWidget):
         ingest_lay.addLayout(file_row)
         left_layout.addWidget(ingest_group)
 
-        # Configurations Group
-        config_group = QGroupBox("GENERATOR SETTINGS", self)
-        config_lay = QGridLayout(config_group)
-        
-        config_lay.addWidget(QLabel("Video Model:", self), 0, 0)
-        self.combo_video_model = QComboBox(self)
-        self.combo_video_model.addItems(["Google Veo 3 (Free)", "Veo 3 Pro (Paid)"])
-        config_lay.addWidget(self.combo_video_model, 0, 1)
-
-        config_lay.addWidget(QLabel("Image Model:", self), 0, 2)
-        self.combo_image_model = QComboBox(self)
-        self.combo_image_model.addItems(["Nano Banana Pro/2", "Nano Banana Lite"])
-        config_lay.addWidget(self.combo_image_model, 0, 3)
-
-        config_lay.addWidget(QLabel("Duration:", self), 1, 0)
-        self.combo_duration = QComboBox(self)
-        self.combo_duration.addItems(["8s (VO3 Standard)", "4s"])
-        config_lay.addWidget(self.combo_duration, 1, 1)
-
-        config_lay.addWidget(QLabel("Aspect Ratio:", self), 1, 2)
-        self.combo_ratio = QComboBox(self)
-        self.combo_ratio.addItems(["9:16", "16:9", "1:1"])
-        config_lay.addWidget(self.combo_ratio, 1, 3)
-
-        # Profiles dropdown
-        config_lay.addWidget(QLabel("Active Profile:", self), 2, 0)
-        self.combo_profiles = QComboBox(self)
-        self.combo_profiles.setMinimumWidth(120)
-        config_lay.addWidget(self.combo_profiles, 2, 1)
-
-        btn_new_prof = QPushButton("+ New", self)
-        btn_new_prof.clicked.connect(self._create_profile)
-        config_lay.addWidget(btn_new_prof, 2, 2)
-
-        btn_login = QPushButton("🔑 Login", self)
-        btn_login.clicked.connect(self._login_headed)
-        config_lay.addWidget(btn_login, 2, 3)
-
-        self.chk_headless = QCheckBox("Run Headless Browser", self)
-        config_lay.addWidget(self.chk_headless, 3, 0, 1, 2)
-
-        self.chk_concurrent = QCheckBox("Submit requests concurrently", self)
-        self.chk_concurrent.setChecked(True)
-        config_lay.addWidget(self.chk_concurrent, 3, 2, 1, 2)
-
-        left_layout.addWidget(config_group)
-
         # Operational buttons
         btn_lay = QHBoxLayout()
         self.btn_start = QPushButton("Start Batch", self)
         self.btn_start.setObjectName("primary")
         self.btn_start.clicked.connect(self._start_batch)
+        
+        self.btn_pause = QPushButton("Pause", self)
+        self.btn_pause.clicked.connect(self._pause_batch)
+        self.btn_pause.setEnabled(False)
+        
         self.btn_stop = QPushButton("Stop", self)
         self.btn_stop.setObjectName("danger")
+        self.btn_stop.clicked.connect(self._stop_batch)
         self.btn_stop.setEnabled(False)
+        
         btn_lay.addWidget(self.btn_start)
+        btn_lay.addWidget(self.btn_pause)
         btn_lay.addWidget(self.btn_stop)
         left_layout.addLayout(btn_lay)
 
@@ -184,11 +178,92 @@ class SnapGenAutomationWidget(QWidget):
 
         splitter.addWidget(left)
 
-        # Right panel: Status Monitor Table
-        right = QWidget(self)
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
+        # Right panel: QTabWidget for Settings, Status, Logs, History
+        self.right_tabs = QTabWidget(self)
+        
+        # Tab 1: Settings
+        self.tab_settings = QWidget(self)
+        tab_settings_lay = QVBoxLayout(self.tab_settings)
+        tab_settings_lay.setContentsMargins(10, 10, 10, 10)
+        tab_settings_lay.setSpacing(15)
+        
+        # Video params group
+        self.group_video_params = QGroupBox("VIDEO SETTINGS", self)
+        video_lay = QGridLayout(self.group_video_params)
+        video_lay.addWidget(QLabel("Video Model:", self), 0, 0)
+        self.combo_video_model = QComboBox(self)
+        self.combo_video_model.addItems(["Google Veo 3 (Free)", "Veo 3 Pro (Paid)"])
+        video_lay.addWidget(self.combo_video_model, 0, 1)
+        video_lay.addWidget(QLabel("Duration:", self), 0, 2)
+        self.combo_duration = QComboBox(self)
+        self.combo_duration.addItems(["8s (VO3 Standard)", "4s"])
+        video_lay.addWidget(self.combo_duration, 0, 3)
+        tab_settings_lay.addWidget(self.group_video_params)
 
+        # Image params group
+        self.group_image_params = QGroupBox("IMAGE SETTINGS", self)
+        image_lay = QGridLayout(self.group_image_params)
+        image_lay.addWidget(QLabel("Image Model:", self), 0, 0)
+        self.combo_image_model = QComboBox(self)
+        self.combo_image_model.addItems(["Nano Banana Pro/2", "Nano Banana Lite"])
+        image_lay.addWidget(self.combo_image_model, 0, 1)
+        tab_settings_lay.addWidget(self.group_image_params)
+        self.group_image_params.setVisible(False) # video mode by default
+        
+        # General parameters
+        gen_params_group = QGroupBox("GENERAL SETTINGS", self)
+        gen_lay = QGridLayout(gen_params_group)
+        gen_lay.addWidget(QLabel("Aspect Ratio:", self), 0, 0)
+        self.combo_ratio = QComboBox(self)
+        self.combo_ratio.addItems(["9:16", "16:9", "1:1"])
+        gen_lay.addWidget(self.combo_ratio, 0, 1)
+        
+        # Download directory
+        gen_lay.addWidget(QLabel("Download Folder:", self), 1, 0)
+        h_dl_lay = QHBoxLayout()
+        self.btn_dl_dir = QPushButton("Choose", self)
+        self.btn_dl_dir.clicked.connect(self._pick_download_dir)
+        self.btn_open_dl = QPushButton("📂 Open", self)
+        self.btn_open_dl.clicked.connect(self._open_download_dir)
+        h_dl_lay.addWidget(self.btn_dl_dir)
+        h_dl_lay.addWidget(self.btn_open_dl)
+        gen_lay.addLayout(h_dl_lay, 1, 1)
+        
+        self.lbl_dl_path_show = QLabel(str(Path.home() / 'Downloads'), self)
+        self.lbl_dl_path_show.setWordWrap(True)
+        gen_lay.addWidget(self.lbl_dl_path_show, 2, 0, 1, 2)
+        tab_settings_lay.addWidget(gen_params_group)
+
+        # Profile Manager Group
+        profile_group = QGroupBox("SNAPGEN PROFILE MANAGER", self)
+        prof_lay = QGridLayout(profile_group)
+        prof_lay.addWidget(QLabel("Active Profile:", self), 0, 0)
+        self.combo_profiles = QComboBox(self)
+        prof_lay.addWidget(self.combo_profiles, 0, 1)
+        
+        btn_new_prof = QPushButton("+ New", self)
+        btn_new_prof.clicked.connect(self._create_profile)
+        prof_lay.addWidget(btn_new_prof, 0, 2)
+
+        btn_login = QPushButton("🔑 Login", self)
+        btn_login.clicked.connect(self._login_headed)
+        prof_lay.addWidget(btn_login, 0, 3)
+
+        self.chk_headless = QCheckBox("Run Headless Browser", self)
+        prof_lay.addWidget(self.chk_headless, 1, 0, 1, 2)
+
+        self.chk_concurrent = QCheckBox("Submit requests concurrently", self)
+        self.chk_concurrent.setChecked(True)
+        prof_lay.addWidget(self.chk_concurrent, 1, 2, 1, 2)
+        tab_settings_lay.addWidget(profile_group)
+        
+        tab_settings_lay.addStretch()
+        self.right_tabs.addTab(self.tab_settings, "⚙️ Settings")
+
+        # Tab 2: Current Batch
+        self.tab_current = QWidget(self)
+        tab_current_lay = QVBoxLayout(self.tab_current)
+        
         monitor_group = QGroupBox("GENERATION STATUS MONITOR", self)
         mon_lay = QVBoxLayout(monitor_group)
         self.table = QTableWidget(self)
@@ -196,17 +271,70 @@ class SnapGenAutomationWidget(QWidget):
         self.table.setHorizontalHeaderLabels(["Index", "Prompt", "Status", "Progress"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         mon_lay.addWidget(self.table)
-        right_layout.addWidget(monitor_group)
+        tab_current_lay.addWidget(monitor_group)
+        self.right_tabs.addTab(self.tab_current, "📊 Current Batch")
 
-        splitter.addWidget(right)
+        # Tab 3: Logs
+        self.tab_logs = QWidget(self)
+        tab_logs_lay = QVBoxLayout(self.tab_logs)
+        self.txt_log = QPlainTextEdit(self)
+        self.txt_log.setReadOnly(True)
+        self.txt_log.setPlaceholderText("Console execution logs will appear here...")
+        tab_logs_lay.addWidget(self.txt_log)
+        self.right_tabs.addTab(self.tab_logs, "📝 Logs")
+
+        # Tab 4: History
+        self.tab_history = QWidget(self)
+        tab_history_lay = QVBoxLayout(self.tab_history)
+        self.table_history = QTableWidget(self)
+        self.table_history.setColumnCount(4)
+        self.table_history.setHorizontalHeaderLabels(["Timestamp", "Prompt", "Type", "Status"])
+        self.table_history.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        tab_history_lay.addWidget(self.table_history)
+        self.right_tabs.addTab(self.tab_history, "📜 History")
+
+        splitter.addWidget(self.right_tabs)
         splitter.setSizes([450, 550])
 
         self._refresh_profiles()
 
+    def _select_video_mode(self):
+        self.gen_mode = "video"
+        self.group_video_params.setVisible(True)
+        self.group_image_params.setVisible(False)
+        self.right_tabs.setCurrentIndex(0)
+
+    def _select_image_mode(self):
+        self.gen_mode = "image"
+        self.group_video_params.setVisible(False)
+        self.group_image_params.setVisible(True)
+        self.right_tabs.setCurrentIndex(0)
+
+    def _pick_download_dir(self):
+        dir_path = QFileDialog.getExistingDirectory(self, "Select Download Directory")
+        if dir_path:
+            self.lbl_dl_path_show.setText(dir_path)
+
+    def _open_download_dir(self):
+        import subprocess
+        p = self.lbl_dl_path_show.text()
+        if os.path.exists(p):
+            try:
+                if sys.platform == "win32":
+                    os.startfile(p)
+                else:
+                    subprocess.run(['xdg-open', p])
+            except Exception as e:
+                QMessageBox.warning(self, "Folder Error", f"Could not open folder: {e}")
+
+    def _update_timer(self):
+        self.elapsed_seconds += 1
+        t = QTime(0, 0, 0).addSecs(self.elapsed_seconds)
+        self.timer_label.setText(t.toString("HH:mm:ss"))
+
     def _refresh_profiles(self):
         profiles_dir = Path.home() / 'Documents' / 'snapgen_video_automation' / 'profiles'
         profiles_dir.mkdir(parents=True, exist_ok=True)
-        # Always ensure Default exists
         (profiles_dir / 'Default').mkdir(exist_ok=True)
         
         self.combo_profiles.clear()
@@ -237,7 +365,7 @@ class SnapGenAutomationWidget(QWidget):
 
         def run_browser():
             try:
-                from playwright.sync_api import sync_playwright
+                from patchright.sync_api import sync_playwright
                 with sync_playwright() as p:
                     launch_args = ["--disable-blink-features=AutomationControlled"]
                     context = p.chromium.launch_persistent_context(
@@ -272,6 +400,7 @@ class SnapGenAutomationWidget(QWidget):
             QMessageBox.warning(self, "Warning", "Please enter at least one prompt.")
             return
 
+        self.txt_log.appendPlainText(f"[Info] Starting batch of {len(prompts)} prompts in {self.gen_mode.upper()} mode...")
         self.table.setRowCount(0)
         for idx, prompt in enumerate(prompts):
             row = self.table.rowCount()
@@ -281,14 +410,96 @@ class SnapGenAutomationWidget(QWidget):
             self.table.setItem(row, 2, QTableWidgetItem("Queued"))
             self.table.setItem(row, 3, QTableWidgetItem("0%"))
 
+        self.is_running = True
+        self.is_paused = False
+        self.elapsed_seconds = 0
+        self.timer_label.setText("00:00:00")
+        self.batch_timer.start(1000)
+
         self.btn_start.setEnabled(False)
+        self.btn_pause.setEnabled(True)
+        self.btn_pause.setText("Pause")
         self.btn_stop.setEnabled(True)
-        # Mock automation run for visual verification
-        QMessageBox.information(self, "Started", "SnapGen AI Video automation batch started successfully!")
+        
+        self.right_tabs.setCurrentIndex(1)
+
+        self.mock_index = 0
+        self.mock_progress = 0
+        QTimer.singleShot(1500, self._run_mock_step)
+
+    def _run_mock_step(self):
+        if not self.is_running or self.is_paused:
+            return
+            
+        if self.mock_index >= self.table.rowCount():
+            self.is_running = False
+            self.batch_timer.stop()
+            self.btn_start.setEnabled(True)
+            self.btn_pause.setEnabled(False)
+            self.btn_stop.setEnabled(False)
+            self.txt_log.appendPlainText("[Info] Batch completed successfully!")
+            
+            for row in range(self.table.rowCount()):
+                p = self.table.item(row, 1).text()
+                h_row = self.table_history.rowCount()
+                self.table_history.insertRow(h_row)
+                self.table_history.setItem(h_row, 0, QTableWidgetItem(time.strftime("%Y-%m-%d %H:%M:%S")))
+                self.table_history.setItem(h_row, 1, QTableWidgetItem(p))
+                self.table_history.setItem(h_row, 2, QTableWidgetItem(self.gen_mode.upper()))
+                self.table_history.setItem(h_row, 3, QTableWidgetItem("COMPLETED"))
+                
+            # Safely set metrics values
+            try:
+                self.stat_lifetime.findChild(QLabel, "statValue").setText(
+                    str(int(self.stat_lifetime.findChild(QLabel, "statValue").text()) + self.table.rowCount())
+                )
+                self.stat_batch.findChild(QLabel, "statValue").setText(str(self.table.rowCount()))
+                self.stat_total.findChild(QLabel, "statValue").setText(str(self.table.rowCount()))
+            except Exception:
+                pass
+            
+            QMessageBox.information(self, "Completed", "SnapGen AI batch processing completed successfully!")
+            return
+
+        self.table.setItem(self.mock_index, 2, QTableWidgetItem("Processing"))
+        self.mock_progress += 25
+        self.table.setItem(self.mock_index, 3, QTableWidgetItem(f"{self.mock_progress}%"))
+        self.txt_log.appendPlainText(f"[Progress] Ingesting prompt #{self.mock_index + 1}: {self.mock_progress}%")
+        
+        if self.mock_progress >= 100:
+            self.table.setItem(self.mock_index, 2, QTableWidgetItem("Completed"))
+            self.mock_index += 1
+            self.mock_progress = 0
+            
+        QTimer.singleShot(1000, self._run_mock_step)
+
+    def _pause_batch(self):
+        if not self.is_running:
+            return
+            
+        if self.is_paused:
+            self.is_paused = False
+            self.btn_pause.setText("Pause")
+            self.txt_log.appendPlainText("[Info] Batch resumed.")
+            self.batch_timer.start(1000)
+            QTimer.singleShot(500, self._run_mock_step)
+        else:
+            self.is_paused = True
+            self.btn_pause.setText("Resume")
+            self.txt_log.appendPlainText("[Info] Batch paused.")
+            self.batch_timer.stop()
 
     def _stop_batch(self):
+        self.is_running = False
+        self.batch_timer.stop()
         self.btn_start.setEnabled(True)
+        self.btn_pause.setEnabled(False)
         self.btn_stop.setEnabled(False)
+        self.txt_log.appendPlainText("[Info] Batch stopped by user.")
+        for row in range(self.table.rowCount()):
+            status_item = self.table.item(row, 2)
+            if status_item and status_item.text() in ("Queued", "Processing"):
+                self.table.setItem(row, 2, QTableWidgetItem("Cancelled"))
 
 
 class OpenCutVideoEditorWidget(QWidget):
