@@ -2086,16 +2086,21 @@ class MainWindow(QMainWindow):
         if not path_str:
             return ""
             
+        import os
         import re
-        match = re.match(r'^([a-zA-Z]):[\\/](.*)', path_str)
-        if match:
-            drive = match.group(1).lower()
-            rest = match.group(2).replace('\\', '/')
-            return f"/mnt/{drive}/{rest}"
-            
-        if '\\' in path_str:
-            path_str = path_str.replace('\\', '/')
-            
+        if os.name != 'nt': # WSL/Linux mode
+            match = re.match(r'^([a-zA-Z]):[\\/](.*)', path_str)
+            if match:
+                drive = match.group(1).lower()
+                rest = match.group(2).replace('\\', '/')
+                return f"/mnt/{drive}/{rest}"
+                
+            if '\\' in path_str:
+                path_str = path_str.replace('\\', '/')
+        else: # Native Windows mode
+            if '/' in path_str:
+                path_str = path_str.replace('/', '\\')
+                
         return path_str
 
     def _load_prompt_from_path(self):
