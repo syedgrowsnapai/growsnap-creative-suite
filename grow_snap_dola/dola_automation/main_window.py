@@ -744,11 +744,8 @@ class MainWindow(QMainWindow):
         lic_lbl.setStyleSheet("color: #2ecc71; font-weight: bold; background: rgba(46, 204, 113, 0.08); border: 1px solid rgba(46, 204, 113, 0.22); border-radius: 6px; padding: 5px 12px; font-size: 11px;")
         header_layout.addWidget(lic_lbl)
         
-        try:
-            from grow_snap_dola.main import APP_VERSION
-            version_lbl = QLabel(f"V{APP_VERSION} PREMIUM", self)
-        except Exception:
-            version_lbl = QLabel("V1.0.8 PREMIUM", self)
+        from dola_automation.version import APP_VERSION
+        version_lbl = QLabel(f"V{APP_VERSION} PREMIUM", self)
         version_lbl.setObjectName("version_badge")
         header_layout.addWidget(version_lbl)
 
@@ -3738,19 +3735,7 @@ class MainWindow(QMainWindow):
 
     def _manual_update_check(self):
         self._log("Checking for updates online...")
-        try:
-            from grow_snap_dola.main import APP_VERSION
-        except ImportError:
-            try:
-                # Add project parent directory to path and import
-                import sys
-                from pathlib import Path
-                proj_root = str(Path(__file__).resolve().parent.parent.parent)
-                if proj_root not in sys.path:
-                    sys.path.append(proj_root)
-                from grow_snap_dola.main import APP_VERSION
-            except ImportError:
-                APP_VERSION = "1.0.0"
+        from dola_automation.version import APP_VERSION
         from dola_automation.updater import check_for_updates
         
         has_update, update_data, error_msg = check_for_updates(APP_VERSION)
