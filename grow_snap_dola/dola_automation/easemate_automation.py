@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QGroupBox, QPlainTextEdit, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QTabWidget, QComboBox, QCheckBox, QFileDialog,
     QMessageBox, QMenu, QDialog, QDialogButtonBox, QFormLayout, QSpinBox, QApplication,
-    QGridLayout
+    QGridLayout, QInputDialog
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot
 from PyQt6.QtGui import QColor
@@ -363,9 +363,11 @@ class EasemateAIAutomationWidget(QWidget):
         self.chk_headless = QCheckBox("Run Headless Browser", self)
         prof_lay.addWidget(self.chk_headless, 1, 0, 1, 2)
 
-        self.chk_concurrent = QCheckBox("Submit requests concurrently", self)
-        self.chk_concurrent.setChecked(False) # free version limitation requires False default
-        prof_lay.addWidget(self.chk_concurrent, 1, 2, 1, 2)
+        prof_lay.addWidget(QLabel("Concurrent Tasks:", self), 1, 2)
+        self.spin_threads = QSpinBox(self)
+        self.spin_threads.setRange(1, 16)
+        self.spin_threads.setValue(1)
+        prof_lay.addWidget(self.spin_threads, 1, 3)
         tab_settings_lay.addWidget(profile_group)
         
         tab_settings_lay.addStretch()
@@ -430,7 +432,37 @@ class EasemateAIAutomationWidget(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to read file: {e}")
         else:
-            QMessageBox.critical(self, "Error", f"File path does not exist:\n{raw_path}")
+            # Fuzzy match in parent directory
+            suggestions = []
+            try:
+                parent_dir = path_obj.parent
+                if parent_dir.exists():
+                    import difflib
+                    all_files = [f.name for f in parent_dir.iterdir() if f.is_file()]
+                    suggestions = difflib.get_close_matches(path_obj.name, all_files, n=5, cutoff=0.3)
+            except Exception:
+                pass
+                
+            if suggestions:
+                item, ok = QInputDialog.getItem(
+                    self, "File Not Found - Suggestions",
+                    f"File path does not exist:\n{raw_path}\n\nDid you mean one of these files in the directory?\nSelect a file to load:",
+                    suggestions, 0, False
+                )
+                if ok and item:
+                    # Replace basename in raw_path
+                    import re
+                    # Split path from the right by either slash or backslash
+                    parts = re.split(r'([\\/])', raw_path)
+                    if len(parts) > 1:
+                        parts[-1] = item
+                        new_val = "".join(parts)
+                    else:
+                        new_val = str(path_obj.parent / item)
+                    self.edit_path.setText(new_val)
+                    self._load_prompt_from_path()
+            else:
+                QMessageBox.critical(self, "Error", f"File path does not exist:\n{raw_path}")
 
     def _load_prompt_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select Prompt File", "", "Text/CSV Files (*.txt *.csv)")
@@ -570,7 +602,7 @@ class EasemateAIAutomationWidget(QWidget):
         res = self.combo_resolution.currentText()
 
         # Start QThread BatchRunner
-        self.runner = EasemateBatchRunner(self.jobs, self.settings, model, ratio, res)
+        self.runner = EasemateBatchRunner(self.jobs, self.settings, model, ratio, res, self.spin_threads.value())
         self.runner.job_progress.connect(self._on_runner_progress)
         self.runner.job_finished.connect(self._on_runner_finished)
         self.runner.batch_finished.connect(self._on_runner_done)

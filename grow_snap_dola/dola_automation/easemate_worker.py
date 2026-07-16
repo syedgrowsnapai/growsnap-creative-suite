@@ -40,12 +40,31 @@ class EasemateBrowserWorker:
         except Exception:
             pass
 
-    def run_job(self, job: PromptJob, model: str, aspect_ratio: str, resolution_ratio: str) -> bool:
+    def run_job(self, job: PromptJob, model: str, aspect_ratio: str, resolution_ratio: str, thread_id: int = 0) -> bool:
         profile_name = getattr(self.settings, 'active_profile_name', 'Default')
-        profile_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / profile_name
-        profile_dir.mkdir(parents=True, exist_ok=True)
         
-        self.log_info(f"Easemate AI Job #{job.index}: Launching browser under profile '{profile_name}'")
+        base_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / profile_name
+        if thread_id != 0:
+            profile_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / f"{profile_name}_thread_{thread_id}"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            # Copy profile context to keep user login session cookies
+            try:
+                import shutil
+                if base_dir.exists():
+                    for item in base_dir.iterdir():
+                        dest_item = profile_dir / item.name
+                        if not dest_item.exists():
+                            if item.is_dir():
+                                shutil.copytree(item, dest_item, dirs_exist_ok=True)
+                            else:
+                                shutil.copy2(item, dest_item)
+            except Exception as e:
+                self.log_info(f"Warning: Failed to copy profile state for thread: {e}")
+        else:
+            profile_dir = base_dir
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            
+        self.log_info(f"Easemate AI Job #{job.index}: Launching browser under profile '{profile_dir.name}'")
         
         success = False
         with sync_playwright() as p:
@@ -191,6 +210,12 @@ class EasemateBrowserWorker:
                     context.close()
                 except Exception:
                     pass
+                if thread_id != 0 and profile_dir.exists():
+                    try:
+                        import shutil
+                        shutil.rmtree(profile_dir, ignore_errors=True)
+                    except Exception:
+                        pass
                     
         return success
 
@@ -200,41 +225,71 @@ class EasemateBatchRunner(QThread):
     job_finished = pyqtSignal(int, bool) # (index, success)
     batch_finished = pyqtSignal()
 
-    def __init__(self, jobs: list[PromptJob], settings: AutomationSettings, model: str, ratio: str, res: str):
+    def __init__(self, jobs: list[PromptJob], settings: AutomationSettings, model: str, ratio: str, res: str, thread_count: int = 1):
         super().__init__()
         self.jobs = jobs
         self.settings = settings
         self.model = model
         self.ratio = ratio
         self.res = res
-        self._worker = None
+        self.thread_count = thread_count
+        self.active_workers = {}
+        self.lock = threading.Lock()
+        self._stop = False
 
     def run(self):
-        self.job_progress.emit(0, f"Starting Easemate AI batch runner for {len(self.jobs)} jobs...")
-        self._worker = EasemateBrowserWorker(self.settings, on_progress=lambda p, msg: self.job_progress.emit(p, msg))
+        self.job_progress.emit(0, f"Starting Easemate AI batch runner for {len(self.jobs)} jobs. Concurrency limit = {self.thread_count}...")
         
-        for job in self.jobs:
-            if job.status == JobStatus.CANCELLED:
-                continue
+        queue = [j for j in self.jobs if j.status not in (JobStatus.CANCELLED, JobStatus.COMPLETED)]
+        running_threads = []
+        
+        def run_single_job(job_obj):
+            job_obj.status = JobStatus.RUNNING
+            self.job_finished.emit(job_obj.index, False)
+            self.job_progress.emit(job_obj.index, f"Processing Job #{job_obj.index}...")
+            
+            # Fresh worker instance to avoid lock conflicts
+            worker = EasemateBrowserWorker(self.settings, on_progress=lambda p, msg: self.job_progress.emit(job_obj.index, msg))
+            with self.lock:
+                if self._stop:
+                    return
+                self.active_workers[job_obj.index] = worker
                 
-            job.status = JobStatus.RUNNING
-            self.job_finished.emit(job.index, False) # update status representation
-            self.job_progress.emit(job.index, f"Processing Job #{job.index}...")
+            success = worker.run_job(job_obj, self.model, self.ratio, self.res, thread_id=threading.get_ident())
             
-            success = self._worker.run_job(job, self.model, self.ratio, self.res)
-            
+            with self.lock:
+                if job_obj.index in self.active_workers:
+                    del self.active_workers[job_obj.index]
+                    
             if success:
-                job.status = JobStatus.COMPLETED
-                self.job_finished.emit(job.index, True)
+                job_obj.status = JobStatus.COMPLETED
+                self.job_finished.emit(job_obj.index, True)
             else:
-                job.status = JobStatus.FAILED
-                self.job_finished.emit(job.index, False)
+                job_obj.status = JobStatus.FAILED
+                self.job_finished.emit(job_obj.index, False)
+
+        while (queue or running_threads) and not self._stop:
+            running_threads = [t for t in running_threads if t.is_alive()]
+            
+            if len(running_threads) < self.thread_count and queue:
+                job = queue.pop(0)
+                t = threading.Thread(target=run_single_job, args=(job,), name=f"EasemateWorker-{job.index}")
+                running_threads.append(t)
+                t.start()
                 
-            # Rest buffer delay between requests
-            time.sleep(2)
+            time.sleep(0.5)
+            
+        # Wait for remaining active threads
+        for t in running_threads:
+            t.join()
             
         self.batch_finished.emit()
 
     def cancel(self):
-        if self._worker:
-            self._worker.cancel()
+        self._stop = True
+        with self.lock:
+            for w in list(self.active_workers.values()):
+                try:
+                    w.cancel()
+                except Exception:
+                    pass
