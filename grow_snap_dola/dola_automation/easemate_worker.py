@@ -106,28 +106,77 @@ class EasemateBrowserWorker:
                 if page.locator("button:has-text('Log In'), button:has-text('Sign Up'), button:has-text('Sign In')").first.is_visible():
                     self.log_info("Warning: Easemate login buttons detected. Headless might run unauthenticated.")
                     
+                # Wait for loading spinner to finish
+                self.log_info("Waiting for page loading spinner to finish...")
+                try:
+                    page.wait_for_selector(".ant-spin-spinning", state="detached", timeout=20000)
+                except Exception:
+                    self.log_info("Timeout waiting for loading spinner to detach, continuing anyway.")
+
+                # Switch to Text to Image tab to reveal prompt input
+                self.log_info("Switching to Text to Image mode...")
+                text_to_image_tab = page.locator("button:has-text('Text to Image'), text='Text to Image'").first
+                if text_to_image_tab.is_visible():
+                    text_to_image_tab.click()
+                    page.wait_for_timeout(1000)
+                else:
+                    self.log_info("Text to Image tab button not visible or already selected.")
+
                 # 1. Model Selection
                 self.log_info(f"Selecting model: {model}")
-                # Click model dropdown trigger
-                trigger = page.locator("div:has-text('Models')").locator("xpath=..").locator("div").nth(1)
-                if not trigger.is_visible():
-                    trigger = page.locator("div:has-text('Models') + div, button:has-text('GPT image 2')").first
+                trigger = None
+                trigger_selectors = [
+                    "span:has-text('Models') + div div.cursor-pointer",
+                    "span:has-text('Models') + div",
+                    "div:has-text('Models') + div div.cursor-pointer",
+                    "button:has-text('GPT image 2')",
+                    "div.cursor-pointer:has-text('GPT image 2')",
+                    "div.cursor-pointer:has-text('EaseMate Standard')"
+                ]
+                for sel in trigger_selectors:
+                    loc = page.locator(sel).first
+                    if loc.is_visible():
+                        trigger = loc
+                        break
                 
-                if trigger.is_visible():
+                if trigger:
+                    self.log_info("Clicking model dropdown trigger...")
                     trigger.click()
-                    page.wait_for_timeout(1000)
+                    page.wait_for_timeout(1500)
                     
                     # Find and click target model
-                    model_option = page.locator(f"text='{model}'").first
-                    if model_option.is_visible():
+                    model_option = None
+                    option_selectors = [
+                        f"text='{model}'",
+                        f"div:has-text('{model}')",
+                        f"span:has-text('{model}')",
+                        f"button:has-text('{model}')"
+                    ]
+                    for o_sel in option_selectors:
+                        opt = page.locator(o_sel).first
+                        if opt.is_visible():
+                            model_option = opt
+                            break
+                            
+                    if model_option:
+                        self.log_info(f"Selecting option: {model}")
                         model_option.click()
-                        page.wait_for_timeout(1000)
+                        page.wait_for_timeout(1500)
                     else:
                         self.log_info(f"Model option '{model}' not found in dropdown list.")
+                else:
+                    self.log_info("Model dropdown trigger not found or not visible.")
                 
                 # 2. Enter Prompt
                 self.log_info(f"Pasting prompt: {job.prompt[:60]}...")
                 textarea = page.locator("textarea").first
+                if not textarea.is_visible():
+                    # Attempt to force wait
+                    try:
+                        page.wait_for_selector("textarea", timeout=5000)
+                        textarea = page.locator("textarea").first
+                    except Exception:
+                        pass
                 if textarea.is_visible():
                     textarea.click()
                     textarea.fill("")
@@ -138,25 +187,47 @@ class EasemateBrowserWorker:
 
                 # 3. Aspect Ratio Selection
                 self.log_info(f"Selecting aspect ratio: {aspect_ratio}")
-                ratio_btn = page.locator("div:has-text('Output Aspect Ratios')").locator("xpath=..").locator(f"text='{aspect_ratio}'").first
-                if not ratio_btn.is_visible():
-                    ratio_btn = page.locator(f"text='{aspect_ratio}'").first
-                if ratio_btn.is_visible():
+                ratio_btn = None
+                ratio_selectors = [
+                    f"div:has-text('Output Aspect Ratios') + div text='{aspect_ratio}'",
+                    f"span:has-text('Output Aspect Ratios') + div text='{aspect_ratio}'",
+                    f"text='{aspect_ratio}'"
+                ]
+                for r_sel in ratio_selectors:
+                    btn = page.locator(r_sel).first
+                    if btn.is_visible():
+                        ratio_btn = btn
+                        break
+                if ratio_btn:
                     ratio_btn.click()
                     page.wait_for_timeout(500)
+                else:
+                    self.log_info(f"Aspect ratio '{aspect_ratio}' not visible, skipping.")
 
                 # 4. Resolution Ratio Selection
                 self.log_info(f"Selecting resolution ratio: {resolution_ratio}")
-                res_trigger = page.locator("div:has-text('Resolution Ratio')").locator("..").locator("xpath=following-sibling::div").first
-                if not res_trigger.is_visible():
-                    res_trigger = page.locator("div:has-text('Resolution Ratio') + div").first
-                if res_trigger.is_visible():
+                res_trigger = None
+                res_trigger_selectors = [
+                    "div:has-text('Resolution Ratio') + div",
+                    "span:has-text('Resolution Ratio') + div",
+                    "div:has-text('Resolution Ratio') + div div.cursor-pointer"
+                ]
+                for rt_sel in res_trigger_selectors:
+                    loc = page.locator(rt_sel).first
+                    if loc.is_visible():
+                        res_trigger = loc
+                        break
+                if res_trigger:
                     res_trigger.click()
                     page.wait_for_timeout(500)
                     res_option = page.locator(f"text='{resolution_ratio}'").first
                     if res_option.is_visible():
                         res_option.click()
                         page.wait_for_timeout(500)
+                    else:
+                        self.log_info(f"Resolution ratio option '{resolution_ratio}' not visible.")
+                else:
+                    self.log_info("Resolution ratio trigger not visible.")
 
                 # 5. Submit / Generate
                 self.log_info("Clicking Generate button...")
