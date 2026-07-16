@@ -20,6 +20,8 @@ from dola_automation.models import AutomationSettings, PromptJob, JobStatus
 from dola_automation.logger import logger
 
 class EasemateBrowserWorker:
+    _use_chrome_channel = True
+    
     def __init__(self, settings: AutomationSettings, on_progress=None):
         self.settings = settings
         self.on_progress = on_progress
@@ -64,8 +66,35 @@ class EasemateBrowserWorker:
             profile_dir = base_dir
             profile_dir.mkdir(parents=True, exist_ok=True)
             
-        self.log_info(f"Easemate AI Job #{job.index}: Launching browser under profile '{profile_dir.name}'")
+        use_chrome = getattr(EasemateBrowserWorker, '_use_chrome_channel', True)
         
+        success = False
+        try:
+            success = self._run_job_with_playwright(job, model, aspect_ratio, resolution_ratio, profile_dir, use_chrome)
+        except Exception as e:
+            err_msg = str(e)
+            if ("browser project is not installed" in err_msg or "executable" in err_msg or "channel" in err_msg) and use_chrome:
+                self.log_info("Chrome channel launch failed. Retrying launch with standard Chromium...")
+                EasemateBrowserWorker._use_chrome_channel = False
+                try:
+                    success = self._run_job_with_playwright(job, model, aspect_ratio, resolution_ratio, profile_dir, False)
+                except Exception as e2:
+                    self.log_info(f"Chromium fallback execution failed: {e2}")
+                    job.error = str(e2)
+            else:
+                self.log_info(f"Execution failed: {e}")
+                job.error = err_msg
+        finally:
+            if thread_id != 0 and profile_dir.exists():
+                try:
+                    import shutil
+                    shutil.rmtree(profile_dir, ignore_errors=True)
+                except Exception:
+                    pass
+                    
+        return success
+
+    def _run_job_with_playwright(self, job: PromptJob, model: str, aspect_ratio: str, resolution_ratio: str, profile_dir: Path, use_chrome: bool) -> bool:
         success = False
         with sync_playwright() as p:
             launch_args = []
@@ -74,30 +103,19 @@ class EasemateBrowserWorker:
             if not self.settings.headless:
                 launch_args.append("--disable-blink-features=AutomationControlled")
                 
-            try:
-                # Attempt to launch with native Chrome first to preserve Google logins
-                context = p.chromium.launch_persistent_context(
-                    user_data_dir=str(profile_dir),
-                    headless=self.settings.headless,
-                    channel="chrome" if not self.settings.headless else None,
-                    viewport={"width": 1280, "height": 800},
-                    args=launch_args
-                )
-                self._context = context
-            except Exception as ce:
-                self.log_info(f"Failed to launch headed Chrome channel, falling back to default Chromium: {ce}")
-                context = p.chromium.launch_persistent_context(
-                    user_data_dir=str(profile_dir),
-                    headless=self.settings.headless,
-                    viewport={"width": 1280, "height": 800},
-                    args=launch_args
-                )
-                self._context = context
-                
-            page = context.pages[0] if context.pages else context.new_page()
-            page.set_default_timeout(60000)
+            context = p.chromium.launch_persistent_context(
+                user_data_dir=str(profile_dir),
+                headless=self.settings.headless,
+                channel="chrome" if (use_chrome and not self.settings.headless) else None,
+                viewport={"width": 1280, "height": 800},
+                args=launch_args
+            )
+            self._context = context
             
             try:
+                page = context.pages[0] if context.pages else context.new_page()
+                page.set_default_timeout(60000)
+                
                 self.log_info("Navigating to easemate.ai...")
                 page.goto("https://www.easemate.ai/ai-image-generator")
                 
@@ -279,20 +297,11 @@ class EasemateBrowserWorker:
                 self.log_info(f"Successfully downloaded image: {dest_path.name}")
                 success = True
                 
-            except Exception as e:
-                self.log_info(f"Execution failed: {e}")
-                job.error = str(e)
             finally:
                 try:
                     context.close()
                 except Exception:
                     pass
-                if thread_id != 0 and profile_dir.exists():
-                    try:
-                        import shutil
-                        shutil.rmtree(profile_dir, ignore_errors=True)
-                    except Exception:
-                        pass
                     
         return success
 
