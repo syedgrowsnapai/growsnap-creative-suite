@@ -635,6 +635,10 @@ class MainWindow(QMainWindow):
         self.btn_nav_snapgen.setCheckable(True)
         self.btn_nav_snapgen.setObjectName("sub_nav_button")
 
+        self.btn_nav_easemate = QPushButton("Easemate AI", self)
+        self.btn_nav_easemate.setCheckable(True)
+        self.btn_nav_easemate.setObjectName("sub_nav_button")
+
         self.btn_nav_opencut = QPushButton("Video Editor", self)
         self.btn_nav_opencut.setCheckable(True)
         self.btn_nav_opencut.setObjectName("sub_nav_button")
@@ -654,6 +658,7 @@ class MainWindow(QMainWindow):
         panel_creative_layout.addWidget(self.btn_nav_platform_automator)
         panel_creative_layout.addWidget(self.btn_nav_dola)
         panel_creative_layout.addWidget(self.btn_nav_snapgen)
+        panel_creative_layout.addWidget(self.btn_nav_easemate)
         panel_creative_layout.addWidget(self.btn_nav_converter)
         panel_creative_layout.addWidget(self.btn_nav_merger)
         panel_creative_layout.addWidget(self.btn_nav_hook_factory)
@@ -778,6 +783,7 @@ class MainWindow(QMainWindow):
         self.nav_group.addButton(self.btn_nav_clipper, 18)
         self.nav_group.addButton(self.btn_nav_showcase, 19)
         self.nav_group.addButton(self.btn_nav_sandbox, 20)
+        self.nav_group.addButton(self.btn_nav_easemate, 21)
         self.nav_group.idClicked.connect(self._on_nav_changed)
 
         # Stacked Widget Page Setup
@@ -1561,17 +1567,21 @@ class MainWindow(QMainWindow):
             SnapGenAutomationWidget, OpenCutVideoEditorWidget, AIVideoClipperWidget,
             CommunityShowcaseWidget, AIModelsSandboxWidget
         )
+        from dola_automation.easemate_automation import EasemateAIAutomationWidget
+
         self.page_snapgen = SnapGenAutomationWidget(self, self.db_path, self.settings)
         self.page_opencut = OpenCutVideoEditorWidget(self, self.db_path, self.settings)
         self.page_clipper = AIVideoClipperWidget(self, self.db_path, self.settings)
         self.page_showcase = CommunityShowcaseWidget(self, self.db_path, self.settings)
         self.page_sandbox = AIModelsSandboxWidget(self, self.db_path, self.settings)
+        self.page_easemate = EasemateAIAutomationWidget(self, self.db_path, self.settings)
 
         self.stacked_widget.addWidget(self.page_snapgen)             # Index 16
         self.stacked_widget.addWidget(self.page_opencut)             # Index 17
         self.stacked_widget.addWidget(self.page_clipper)             # Index 18
         self.stacked_widget.addWidget(self.page_showcase)            # Index 19
         self.stacked_widget.addWidget(self.page_sandbox)             # Index 20
+        self.stacked_widget.addWidget(self.page_easemate)            # Index 21
 
     def _on_nav_changed(self, button_id):
         self.stacked_widget.setCurrentIndex(button_id)
@@ -1596,7 +1606,8 @@ class MainWindow(QMainWindow):
             17: "OpenCut Video Editor",
             18: "AI Video Clipper",
             19: "Community Showcase & Prompts",
-            20: "AI Models Sandbox"
+            20: "AI Models Sandbox",
+            21: "Easemate AI Image Generator"
         }
         if hasattr(self, 'title_lbl'):
             self.title_lbl.setText(titles.get(button_id, "GrowSnap One"))

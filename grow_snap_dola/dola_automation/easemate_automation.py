@@ -1,0 +1,917 @@
+import os
+import time
+import subprocess
+import threading
+from pathlib import Path
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QSplitter, QScrollArea,
+    QGroupBox, QPlainTextEdit, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
+    QHeaderView, QAbstractItemView, QTabWidget, QComboBox, QCheckBox, QFileDialog,
+    QMessageBox, QMenu, QDialog, QDialogButtonBox, QFormLayout, QSpinBox, QApplication,
+    QGridLayout
+)
+from PyQt6.QtCore import Qt, QTimer, pyqtSlot
+from PyQt6.QtGui import QColor
+
+from dola_automation.models import AutomationSettings, PromptJob, JobStatus
+from dola_automation.new_tabs import CheckableComboBox, JobDialog
+from dola_automation.easemate_worker import EasemateBatchRunner
+from dola_automation.logger import logger
+
+def parse_easemate_csv(content_or_path: str) -> list[tuple[str, str, str]]:
+    """
+    Parses CSV content or filepath mapping multi-mockup columns.
+    Returns a list of tuples: (prompt, video_title, suffix)
+    """
+    import io
+    import csv
+    
+    content = content_or_path
+    try:
+        path_obj = Path(content_or_path)
+        if path_obj.exists() and path_obj.is_file():
+            with open(path_obj, 'r', encoding='utf-8') as f:
+                content = f.read()
+    except Exception:
+        pass
+        
+    normalized = content.replace('\r\n', '\n').strip()
+    
+    try:
+        f = io.StringIO(normalized)
+        reader = csv.reader(f)
+        rows = list(reader)
+        if not rows:
+            return []
+            
+        header = [col.strip().lower() for col in rows[0]]
+        
+        # Detect multi-mockup columns
+        if "product_title" in header or any(col.startswith("mockup_") for col in header):
+            title_idx = header.index("product_title") if "product_title" in header else -1
+            card_id_idx = header.index("card_id") if "card_id" in header else -1
+            
+            # Map column indices to suffix names
+            mockup_cols = []
+            suffix_map = {
+                "mockup_1_hero_prompt": "hero image",
+                "mockup_2_variant_white_standard_prompt": "variant white standard",
+                "mockup_3_variant_white_luxury_prompt": "variant white luxury",
+                "mockup_4_variant_gold_standard_prompt": "variant gold standard",
+                "mockup_5_variant_gold_luxury_prompt": "variant gold luxury",
+                "mockup_6_supplement_ugc_worn_prompt": "supplement ugc worn",
+                "mockup_7_supplement_unboxing_prompt": "supplement unboxing",
+                "mockup_8_supplement_reaction_prompt": "supplement reaction",
+                "mockup_9_supplement_macro_detail_prompt": "supplement macro detail"
+            }
+            
+            for idx, col in enumerate(header):
+                if col.startswith("mockup_") and col.endswith("_prompt"):
+                    suffix = suffix_map.get(col, col.replace("mockup_", "").replace("_prompt", "").replace("_", " "))
+                    mockup_cols.append((idx, suffix))
+                    
+            mockup_cols.sort(key=lambda x: header[x[0]])
+            
+            results = []
+            for r_idx, row in enumerate(rows[1:]):
+                if not row or len(row) <= max(title_idx, 0):
+                    continue
+                
+                card_id_prefix = f"[{row[card_id_idx].strip()}] " if card_id_idx != -1 and card_id_idx < len(row) and row[card_id_idx].strip() else ""
+                prod_title = row[title_idx].strip() if title_idx != -1 and title_idx < len(row) else f"Product {r_idx + 1}"
+                
+                for col_idx, suffix in mockup_cols:
+                    if col_idx < len(row) and row[col_idx].strip():
+                        prompt_val = row[col_idx].strip()
+                        full_title = f"{card_id_prefix}{prod_title} - {suffix}"
+                        results.append((prompt_val, full_title, suffix))
+            if results:
+                return results
+    except Exception as e:
+        logger.error(f"Error parsing CSV in Easemate layout: {e}")
+        
+    # Standard fallback
+    from dola_automation.models import parse_prompts
+    std_parsed = parse_prompts(content)
+    return [(p, title or f"Image_{idx+1}", "image") for idx, (p, c, title, s_idx) in enumerate(std_parsed)]
+
+
+class EasemateAIAutomationWidget(QWidget):
+    def __init__(self, parent=None, db_path=None, global_settings=None):
+        super().__init__(parent)
+        self.db_path = db_path
+        self.settings = global_settings or AutomationSettings()
+        self.jobs = []
+        self.runner = None
+        self._init_ui()
+
+    def _stat_card(self, label_text: str, default_val: str) -> QFrame:
+        card = QFrame(self)
+        card.setObjectName("stat_card")
+        card.setFixedHeight(80)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(10, 10, 10, 10)
+        lbl = QLabel(label_text, card)
+        lbl.setObjectName("statLabel")
+        val = QLabel(default_val, card)
+        val.setObjectName("statValue")
+        layout.addWidget(lbl)
+        layout.addWidget(val)
+        return card
+
+    def _init_ui(self):
+        self.is_paused = False
+        self.is_running = False
+        self.elapsed_seconds = 0
+        self.batch_timer = QTimer(self)
+        self.batch_timer.timeout.connect(self._update_timer)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(15)
+
+        # Header Title
+        lbl_subtitle = QLabel("EASEMATE AI IMAGE GENERATOR — powered by ChatGPT image tool, Google Nano Banana, Seedrum Pro/5.0, or Kling 3.0", self)
+        lbl_subtitle.setObjectName("subtitle")
+        lbl_subtitle.setFixedHeight(20)
+        layout.addWidget(lbl_subtitle)
+
+        # Stats Bar
+        stats_row = QHBoxLayout()
+        stats_row.setSpacing(15)
+        
+        self.stat_lifetime = self._stat_card("LIFETIME IMAGES", "0")
+        self.stat_batch = self._stat_card("BATCH IMAGES", "0")
+        self.stat_total = self._stat_card("BATCH PROMPTS", "0")
+        self.stat_fail = self._stat_card("BATCH FAILED", "0")
+
+        timer_card = QFrame(self)
+        timer_card.setObjectName("stat_card")
+        timer_card.setFixedHeight(80)
+        timer_card_layout = QVBoxLayout(timer_card)
+        timer_label_lbl = QLabel("ELAPSED TIME", timer_card)
+        timer_label_lbl.setObjectName("statLabel")
+        self.timer_label = QLabel("00:00:00", timer_card)
+        self.timer_label.setObjectName("timer_label")
+        timer_card_layout.addWidget(timer_label_lbl)
+        timer_card_layout.addWidget(self.timer_label)
+
+        stats_row.addWidget(self.stat_lifetime)
+        stats_row.addWidget(self.stat_batch)
+        stats_row.addWidget(self.stat_total)
+        stats_row.addWidget(self.stat_fail)
+        stats_row.addWidget(timer_card)
+        layout.addLayout(stats_row, 0)
+
+        # Splitter Layout
+        splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        layout.addWidget(splitter, 1)
+
+        # Left Scroll Panel (Inputs)
+        left_scroll = QScrollArea(self)
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
+        left = QWidget()
+        left.setObjectName("left_panel_container")
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(15)
+
+        # Mode Selection
+        mode_group = QGroupBox("GENERATION MODE")
+        mode_lay = QHBoxLayout(mode_group)
+        self.btn_mode_image = QPushButton("🖼️ Generate Mockup Image", self)
+        self.btn_mode_image.setCheckable(True)
+        self.btn_mode_image.setChecked(True)
+        mode_lay.addWidget(self.btn_mode_image)
+        left_layout.addWidget(mode_group)
+
+        # Prompt Ingestion
+        ingest_group = QGroupBox("PROMPT INGESTION")
+        ingest_lay = QVBoxLayout(ingest_group)
+        self.prompt_editor = QPlainTextEdit()
+        self.prompt_editor.setPlaceholderText("Enter or paste mockup prompts here...")
+        ingest_lay.addWidget(self.prompt_editor)
+        
+        path_row = QHBoxLayout()
+        self.edit_path = QLineEdit()
+        self.edit_path.setPlaceholderText("Paste CSV/TXT file path here...")
+        self.btn_load_path = QPushButton("Load Path")
+        self.btn_load_path.clicked.connect(self._load_prompt_from_path)
+        path_row.addWidget(self.edit_path)
+        path_row.addWidget(self.btn_load_path)
+        ingest_lay.addLayout(path_row)
+        
+        btn_row = QHBoxLayout()
+        self.btn_load_file = QPushButton("Load CSV/TXT")
+        self.btn_load_file.clicked.connect(self._load_prompt_file)
+        self.btn_parse = QPushButton("Parse prompts")
+        self.btn_parse.clicked.connect(self._parse_prompts)
+        btn_row.addWidget(self.btn_load_file)
+        btn_row.addWidget(self.btn_parse)
+        ingest_lay.addLayout(btn_row)
+        left_layout.addWidget(ingest_group)
+        
+        left_scroll.setWidget(left)
+        splitter.addWidget(left_scroll)
+
+        # Right Tab Widget
+        self.right_tabs = QTabWidget(self)
+        
+        # Tab 1: Current Jobs
+        self.tab_current = QWidget(self)
+        tab_current_lay = QVBoxLayout(self.tab_current)
+        
+        filter_bar = QHBoxLayout()
+        lbl_filter = QLabel("Filter Status:", self)
+        lbl_filter.setStyleSheet("font-weight: bold; color: #2ecc71;")
+        filter_bar.addWidget(lbl_filter)
+        
+        self.combo_filter_status = CheckableComboBox(self)
+        self.combo_filter_status.add_checkable_item("All Statuses", checked=True)
+        self.combo_filter_status.add_checkable_item("Pending", checked=True)
+        self.combo_filter_status.add_checkable_item("Running", checked=True)
+        self.combo_filter_status.add_checkable_item("Completed", checked=True)
+        self.combo_filter_status.add_checkable_item("Failed", checked=True)
+        self.combo_filter_status.add_checkable_item("Cancelled", checked=True)
+        self.combo_filter_status.checkedItemsChanged.connect(self._apply_table_filters)
+        filter_bar.addWidget(self.combo_filter_status)
+        
+        lbl_search = QLabel("Search:", self)
+        lbl_search.setStyleSheet("font-weight: bold; color: #2ecc71; margin-left: 10px;")
+        filter_bar.addWidget(lbl_search)
+        
+        self.edit_search = QLineEdit(self)
+        self.edit_search.setPlaceholderText("Search rows...")
+        self.edit_search.textChanged.connect(self._apply_table_filters)
+        filter_bar.addWidget(self.edit_search)
+        
+        self.btn_clear_filters = QPushButton("Clear Filters", self)
+        self.btn_clear_filters.clicked.connect(self._clear_filters)
+        filter_bar.addWidget(self.btn_clear_filters)
+        tab_current_lay.addLayout(filter_bar)
+
+        self.table = QTableWidget(self)
+        self.table.setColumnCount(8)
+        self.table.setHorizontalHeaderLabels([
+            "Index", "Product Title", "Suffix", "Prompt", "Status", "Download Path", "Error Details", "Action"
+        ])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table.setColumnWidth(0, 50)
+        self.table.setColumnWidth(1, 150)
+        self.table.setColumnWidth(2, 100)
+        self.table.setColumnWidth(3, 220)
+        self.table.setColumnWidth(4, 90)
+        self.table.setColumnWidth(5, 120)
+        self.table.setColumnWidth(6, 120)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_table_context_menu)
+        tab_current_lay.addWidget(self.table)
+
+        action_bar = QHBoxLayout()
+        self.btn_select_all = QPushButton("Select All", self)
+        self.btn_select_all.clicked.connect(self._toggle_select_all)
+        self.btn_download_selected = QPushButton("Download Selected", self)
+        self.btn_download_selected.clicked.connect(self._download_selected_jobs)
+        self.btn_retry_failed = QPushButton("Retry All Failed", self)
+        self.btn_retry_failed.clicked.connect(self._retry_all_failed_jobs)
+        action_bar.addWidget(self.btn_select_all)
+        action_bar.addWidget(self.btn_download_selected)
+        action_bar.addWidget(self.btn_retry_failed)
+        tab_current_lay.addLayout(action_bar)
+        
+        self.right_tabs.addTab(self.tab_current, "Current Jobs")
+
+        # Tab 2: History Logs
+        self.tab_logs = QWidget(self)
+        tab_logs_lay = QVBoxLayout(self.tab_logs)
+        self.txt_log = QPlainTextEdit(self)
+        self.txt_log.setReadOnly(True)
+        tab_logs_lay.addWidget(self.txt_log)
+        self.right_tabs.addTab(self.tab_logs, "History Logs")
+
+        # Tab 3: Settings
+        self.tab_settings = QWidget(self)
+        tab_settings_lay = QVBoxLayout(self.tab_settings)
+        tab_settings_lay.setContentsMargins(10, 10, 10, 10)
+        tab_settings_lay.setSpacing(15)
+
+        # Image settings group
+        gen_params_group = QGroupBox("IMAGE SETTINGS", self)
+        gen_lay = QGridLayout(gen_params_group)
+        gen_lay.addWidget(QLabel("Image Model:", self), 0, 0)
+        self.combo_model = QComboBox(self)
+        models_list = [
+            "GPT image 2", "GPT-4o", "GPT image 1.5",
+            "Nano Banana 2", "Nano Banana Pro", "Nano Banana",
+            "Seedream 5.0 Pro", "Seedream 5.0 lite", "Seedream 4.5", "Seedream 4.0",
+            "Kling O1 Image", "Midjourney image",
+            "Wan 2.7 image pro", "Wan 2.7 image", "Wan 2.5 image",
+            "Qwen image", "Qwen image 2512", "Qwen image 2.0",
+            "FLUX 2 Pro", "FLUX 2 Flex", "FLUX Kontext Pro", "FLUX Kontext Max",
+            "Hunyuan Image 3"
+        ]
+        self.combo_model.addItems(models_list)
+        gen_lay.addWidget(self.combo_model, 0, 1)
+
+        gen_lay.addWidget(QLabel("Aspect Ratio:", self), 1, 0)
+        self.combo_ratio = QComboBox(self)
+        self.combo_ratio.addItems([
+            "1:1", "Auto", "9:16", "16:9", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2", "3:1", "1:3", "21:9", "9:21"
+        ])
+        gen_lay.addWidget(self.combo_ratio, 1, 1)
+
+        gen_lay.addWidget(QLabel("Resolution Ratio:", self), 2, 0)
+        self.combo_resolution = QComboBox(self)
+        self.combo_resolution.addItems(["1K", "2K", "4K"])
+        self.combo_resolution.setCurrentText("4K")
+        gen_lay.addWidget(self.combo_resolution, 2, 1)
+
+        h_dl_lay = QHBoxLayout()
+        self.lbl_download_dir_title = QLabel("Download Folder:", self)
+        h_dl_lay.addWidget(self.lbl_download_dir_title)
+        self.btn_dl_dir = QPushButton("Choose", self)
+        self.btn_dl_dir.clicked.connect(self._pick_download_dir)
+        self.btn_open_dl = QPushButton("📂 Open", self)
+        self.btn_open_dl.clicked.connect(self._open_download_dir)
+        h_dl_lay.addWidget(self.btn_dl_dir)
+        h_dl_lay.addWidget(self.btn_open_dl)
+        gen_lay.addLayout(h_dl_lay, 3, 1)
+        
+        self.lbl_dl_path_show = QLabel(str(Path.home() / 'Documents' / 'easemate_downloads'), self)
+        self.lbl_dl_path_show.setWordWrap(True)
+        gen_lay.addWidget(self.lbl_dl_path_show, 4, 0, 1, 2)
+        tab_settings_lay.addWidget(gen_params_group)
+
+        # Profile Group
+        profile_group = QGroupBox("EASEMATE PROFILE MANAGER", self)
+        prof_lay = QGridLayout(profile_group)
+        prof_lay.addWidget(QLabel("Active Profile:", self), 0, 0)
+        self.combo_profiles = QComboBox(self)
+        prof_lay.addWidget(self.combo_profiles, 0, 1)
+        
+        btn_new_prof = QPushButton("+ New", self)
+        btn_new_prof.clicked.connect(self._create_profile)
+        prof_lay.addWidget(btn_new_prof, 0, 2)
+
+        btn_login = QPushButton("🔑 Login (headed)", self)
+        btn_login.clicked.connect(self._login_headed)
+        prof_lay.addWidget(btn_login, 0, 3)
+
+        self.chk_headless = QCheckBox("Run Headless Browser", self)
+        prof_lay.addWidget(self.chk_headless, 1, 0, 1, 2)
+
+        self.chk_concurrent = QCheckBox("Submit requests concurrently", self)
+        self.chk_concurrent.setChecked(False) # free version limitation requires False default
+        prof_lay.addWidget(self.chk_concurrent, 1, 2, 1, 2)
+        tab_settings_lay.addWidget(profile_group)
+        
+        tab_settings_lay.addStretch()
+        self.right_tabs.addTab(self.tab_settings, "Settings")
+
+        # Tab 4: Lifetime History
+        self.tab_history = QWidget(self)
+        tab_history_lay = QVBoxLayout(self.tab_history)
+        self.table_history = QTableWidget(self)
+        self.table_history.setColumnCount(4)
+        self.table_history.setHorizontalHeaderLabels(["Timestamp", "Prompt", "Model", "Status"])
+        self.table_history.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        tab_history_lay.addWidget(self.table_history)
+        self.right_tabs.addTab(self.tab_history, "Lifetime History")
+
+        splitter.addWidget(self.right_tabs)
+        splitter.setSizes([350, 650])
+
+        # Bottom Operational Panel
+        run_row = QHBoxLayout()
+        self.btn_start = QPushButton("Start batch")
+        self.btn_start.setObjectName("primary")
+        self.btn_start.clicked.connect(self._start_batch)
+        self.btn_pause = QPushButton("Pause")
+        self.btn_pause.setEnabled(False)
+        self.btn_pause.clicked.connect(self._pause_batch)
+        self.btn_stop = QPushButton("Stop")
+        self.btn_stop.setEnabled(False)
+        self.btn_stop.clicked.connect(self._stop_batch)
+        run_row.addWidget(self.btn_start)
+        run_row.addWidget(self.btn_pause)
+        run_row.addWidget(self.btn_stop)
+        layout.addLayout(run_row)
+
+        self._refresh_profiles()
+
+    def _translate_windows_path(self, path_str: str) -> str:
+        path_str = path_str.strip().strip('"').strip("'")
+        if not path_str:
+            return ""
+        import re
+        match = re.match(r'^([a-zA-Z]):[\\/](.*)', path_str)
+        if match:
+            drive = match.group(1).lower()
+            rest = match.group(2).replace('\\', '/')
+            return f"/mnt/{drive}/{rest}"
+        if '\\' in path_str:
+            path_str = path_str.replace('\\', '/')
+        return path_str
+
+    def _load_prompt_from_path(self):
+        raw_path = self.edit_path.text().strip()
+        if not raw_path:
+            return
+        translated = self._translate_windows_path(raw_path)
+        path_obj = Path(translated)
+        if path_obj.exists() and path_obj.is_file():
+            try:
+                with open(path_obj, 'r', encoding='utf-8') as f:
+                    self.prompt_editor.setPlainText(f.read())
+                self.txt_log.appendPlainText(f"[Info] Loaded prompts from pasted path: {path_obj.name}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to read file: {e}")
+        else:
+            QMessageBox.critical(self, "Error", f"File path does not exist:\n{raw_path}")
+
+    def _load_prompt_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select Prompt File", "", "Text/CSV Files (*.txt *.csv)")
+        if path:
+            self.edit_path.setText(path)
+            self._load_prompt_from_path()
+
+    def _parse_prompts(self):
+        text = self.prompt_editor.toPlainText().strip()
+        if not text:
+            QMessageBox.warning(self, "No Prompts", "Please enter prompts or load a sheet file first.")
+            return
+
+        parsed = parse_easemate_csv(text)
+        if not parsed:
+            QMessageBox.warning(self, "No Valid Rows", "No valid prompts parsed. Verify sheet headers.")
+            return
+
+        self.jobs.clear()
+        for idx, (prompt, title, suffix) in enumerate(parsed):
+            job = PromptJob(
+                index=idx + 1,
+                prompt=prompt,
+                video_title=title,
+                caption=suffix,
+                status=JobStatus.PENDING
+            )
+            self.jobs.append(job)
+
+        self._refresh_table()
+        self._update_stats()
+        self.txt_log.appendPlainText(f"[Info] Successfully loaded {len(self.jobs)} mockup generation jobs.")
+
+    def _refresh_table(self):
+        self.table.blockSignals(True)
+        self.table.setRowCount(len(self.jobs))
+        for row, job in enumerate(self.jobs):
+            # Index
+            idx_item = QTableWidgetItem(str(job.index))
+            idx_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            self.table.setItem(row, 0, idx_item)
+
+            # Product Title
+            title_item = QTableWidgetItem(job.video_title)
+            title_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            self.table.setItem(row, 1, title_item)
+
+            # Suffix
+            suffix_item = QTableWidgetItem(job.caption or "mockup")
+            suffix_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            self.table.setItem(row, 2, suffix_item)
+
+            # Prompt
+            prompt_item = QTableWidgetItem(job.prompt)
+            prompt_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            self.table.setItem(row, 3, prompt_item)
+
+            # Status
+            status_item = QTableWidgetItem(job.status.value.upper())
+            status_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            if job.status == JobStatus.COMPLETED:
+                status_item.setForeground(QColor("#2ecc71"))
+            elif job.status == JobStatus.FAILED:
+                status_item.setForeground(QColor("#e74c3c"))
+            elif job.status == JobStatus.RUNNING:
+                status_item.setForeground(QColor("#3498db"))
+            self.table.setItem(row, 4, status_item)
+
+            # Download Path
+            dp_item = QTableWidgetItem(job.download_path or "-")
+            dp_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            self.table.setItem(row, 5, dp_item)
+
+            # Error Details
+            err_item = QTableWidgetItem(job.error or "-")
+            err_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            if job.error:
+                err_item.setForeground(QColor("#e67e22"))
+            self.table.setItem(row, 6, err_item)
+
+            # Action Button
+            btn_widget = QWidget()
+            btn_lay = QHBoxLayout(btn_widget)
+            btn_lay.setContentsMargins(2, 2, 2, 2)
+            relaunch_btn = QPushButton("Relaunch")
+            relaunch_btn.setStyleSheet("padding: 2px 8px; font-size: 11px;")
+            relaunch_btn.clicked.connect(lambda checked, idx=job.index: self._relaunch_job_manual(idx))
+            btn_lay.addWidget(relaunch_btn)
+            self.table.setCellWidget(row, 7, btn_widget)
+
+        self.table.blockSignals(False)
+
+    def _update_stats(self):
+        total = len(self.jobs)
+        failed = sum(1 for j in self.jobs if j.status == JobStatus.FAILED)
+        completed = sum(1 for j in self.jobs if j.status == JobStatus.COMPLETED)
+        
+        try:
+            self.stat_total.findChild(QLabel, "statValue").setText(str(total))
+            self.stat_fail.findChild(QLabel, "statValue").setText(str(failed))
+            self.stat_batch.findChild(QLabel, "statValue").setText(str(completed))
+        except Exception:
+            pass
+
+    def _update_timer(self):
+        self.elapsed_seconds += 1
+        hours, remainder = divmod(self.elapsed_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        self.timer_label.setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+
+    def _start_batch(self):
+        if not self.jobs:
+            self._parse_prompts()
+            if not self.jobs:
+                return
+
+        self.txt_log.appendPlainText(f"[Info] Starting Easemate AI generation for {len(self.jobs)} items...")
+        self.is_running = True
+        self.is_paused = False
+        self.elapsed_seconds = 0
+        self.timer_label.setText("00:00:00")
+        self.batch_timer.start(1000)
+
+        self.btn_start.setEnabled(False)
+        self.btn_pause.setEnabled(True)
+        self.btn_pause.setText("Pause")
+        self.btn_stop.setEnabled(True)
+        self.right_tabs.setCurrentIndex(0)
+
+        # Set runner configs
+        self.settings.download_dir = Path(self.lbl_dl_path_show.text())
+        self.settings.headless = self.chk_headless.isChecked()
+        self.settings.active_profile_name = self.combo_profiles.currentText() or "Default"
+
+        model = self.combo_model.currentText()
+        ratio = self.combo_ratio.currentText()
+        res = self.combo_resolution.currentText()
+
+        # Start QThread BatchRunner
+        self.runner = EasemateBatchRunner(self.jobs, self.settings, model, ratio, res)
+        self.runner.job_progress.connect(self._on_runner_progress)
+        self.runner.job_finished.connect(self._on_runner_finished)
+        self.runner.batch_finished.connect(self._on_runner_done)
+        self.runner.start()
+
+    def _on_runner_progress(self, index: int, message: str):
+        self.txt_log.appendPlainText(message)
+
+    def _on_runner_finished(self, index: int, success: bool):
+        self._refresh_table()
+        self._update_stats()
+
+    def _on_runner_done(self):
+        self.is_running = False
+        self.batch_timer.stop()
+        self.btn_start.setEnabled(True)
+        self.btn_pause.setEnabled(False)
+        self.btn_stop.setEnabled(False)
+        
+        # Add to history log table
+        for job in self.jobs:
+            if job.status == JobStatus.COMPLETED:
+                h_row = self.table_history.rowCount()
+                self.table_history.insertRow(h_row)
+                self.table_history.setItem(h_row, 0, QTableWidgetItem(time.strftime("%Y-%m-%d %H:%M:%S")))
+                self.table_history.setItem(h_row, 1, QTableWidgetItem(job.prompt[:80]))
+                self.table_history.setItem(h_row, 2, QTableWidgetItem(self.combo_model.currentText()))
+                self.table_history.setItem(h_row, 3, QTableWidgetItem("COMPLETED"))
+
+        try:
+            val_lbl = self.stat_lifetime.findChild(QLabel, "statValue")
+            val_lbl.setText(str(int(val_lbl.text()) + sum(1 for j in self.jobs if job.status == JobStatus.COMPLETED)))
+        except Exception:
+            pass
+
+        QMessageBox.information(self, "Batch Completed", "Easemate AI batch generation complete!")
+
+    def _pause_batch(self):
+        if not self.is_running:
+            return
+        if self.is_paused:
+            self.is_paused = False
+            self.btn_pause.setText("Pause")
+            self.txt_log.appendPlainText("[Info] Batch resumed.")
+            self.batch_timer.start(1000)
+            # Resume runner
+        else:
+            self.is_paused = True
+            self.btn_pause.setText("Resume")
+            self.txt_log.appendPlainText("[Info] Batch paused.")
+            self.batch_timer.stop()
+
+    def _stop_batch(self):
+        if self.runner:
+            self.runner.cancel()
+        self.is_running = False
+        self.batch_timer.stop()
+        self.btn_start.setEnabled(True)
+        self.btn_pause.setEnabled(False)
+        self.btn_stop.setEnabled(False)
+        self.txt_log.appendPlainText("[Info] Batch stopped by user.")
+        for job in self.jobs:
+            if job.status in (JobStatus.PENDING, JobStatus.RUNNING):
+                job.status = JobStatus.CANCELLED
+        self._refresh_table()
+
+    def _relaunch_job_manual(self, index: int):
+        target_job = next((j for j in self.jobs if j.index == index), None)
+        if not target_job:
+            return
+            
+        profile = self.combo_profiles.currentText() or "Default"
+        profile_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / profile
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.txt_log.appendPlainText(f"[Manual] Launching browser for Job #{index}...")
+        
+        def run_headed():
+            try:
+                # Try to use patchright for stealth, fallback to playwright
+                try:
+                    from patchright.sync_api import sync_playwright
+                except ImportError:
+                    from playwright.sync_api import sync_playwright
+
+                with sync_playwright() as p:
+                    launch_args = ["--disable-blink-features=AutomationControlled"]
+                    try:
+                        context = p.chromium.launch_persistent_context(
+                            user_data_dir=str(profile_dir),
+                            headless=False,
+                            channel="chrome",
+                            args=launch_args,
+                            viewport={"width": 1280, "height": 800}
+                        )
+                    except Exception:
+                        context = p.chromium.launch_persistent_context(
+                            user_data_dir=str(profile_dir),
+                            headless=False,
+                            args=launch_args,
+                            viewport={"width": 1280, "height": 800}
+                        )
+                    page = context.pages[0] if context.pages else context.new_page()
+                    page.goto("https://www.easemate.ai/ai-image-generator")
+                    
+                    # Fill prompt if textarea is visible
+                    textarea = page.locator("textarea").first
+                    if textarea.is_visible():
+                        textarea.click()
+                        textarea.fill(target_job.prompt)
+                        
+                    while len(context.pages) > 0:
+                        time.sleep(0.5)
+            except Exception as e:
+                logger.error(f"Error launching headed manual browser: {e}")
+                
+        threading.Thread(target=run_headed, daemon=True).start()
+
+    # Settings and Profile Helpers
+    def _pick_download_dir(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Download Folder", self.lbl_dl_path_show.text())
+        if folder:
+            self.lbl_dl_path_show.setText(folder)
+
+    def _open_download_dir(self):
+        path = self.lbl_dl_path_show.text()
+        if os.path.exists(path):
+            if os.name == 'nt':
+                os.startfile(path)
+            else:
+                import subprocess
+                subprocess.run(["xdg-open", path])
+
+    def _refresh_profiles(self):
+        profiles_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles'
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        (profiles_dir / 'Default').mkdir(exist_ok=True)
+        
+        self.combo_profiles.clear()
+        for d in profiles_dir.iterdir():
+            if d.is_dir():
+                self.combo_profiles.addItem(d.name)
+
+    def _create_profile(self):
+        from PyQt6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "Create Profile", "Enter Easemate profile name:")
+        if ok and name.strip():
+            clean = "".join(c for c in name if c.isalnum() or c in (' ', '_')).strip()
+            if clean:
+                profiles_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles'
+                (profiles_dir / clean).mkdir(parents=True, exist_ok=True)
+                self._refresh_profiles()
+                self.combo_profiles.setCurrentText(clean)
+
+    def _login_headed(self):
+        profile = self.combo_profiles.currentText() or "Default"
+        profile_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / profile
+        
+        QMessageBox.information(
+            self, "Manual Login", 
+            f"A headed browser will open under profile '{profile}'.\n\n"
+            "Please login to easemate.ai, then close the browser to save your session."
+        )
+
+        def run_browser():
+            try:
+                # Try to use patchright for stealth, fallback to playwright
+                try:
+                    from patchright.sync_api import sync_playwright
+                except ImportError:
+                    from playwright.sync_api import sync_playwright
+
+                with sync_playwright() as p:
+                    launch_args = ["--disable-blink-features=AutomationControlled"]
+                    try:
+                        context = p.chromium.launch_persistent_context(
+                            user_data_dir=str(profile_dir),
+                            headless=False,
+                            channel="chrome",
+                            args=launch_args,
+                            viewport={"width": 1280, "height": 800}
+                        )
+                    except Exception:
+                        context = p.chromium.launch_persistent_context(
+                            user_data_dir=str(profile_dir),
+                            headless=False,
+                            args=launch_args,
+                            viewport={"width": 1280, "height": 800}
+                        )
+                    page = context.pages[0] if context.pages else context.new_page()
+                    try:
+                        page.goto("https://www.easemate.ai/ai-image-generator", timeout=15000)
+                    except Exception as ge:
+                        print("Initial navigation timeout/error, user can navigate manually:", ge)
+                    while len(context.pages) > 0:
+                        time.sleep(0.5)
+            except Exception as e:
+                print("Error opening headed browser:", e)
+
+        threading.Thread(target=run_browser, daemon=True).start()
+
+    # Table Actions Context Menu
+    def _on_table_context_menu(self, pos):
+        menu = QMenu(self)
+        selected_rows = set(idx.row() for idx in self.table.selectedIndexes())
+        
+        actions = []
+        if selected_rows:
+            row = list(selected_rows)[0]
+            job = self.jobs[row]
+            
+            if job.download_path and os.path.exists(job.download_path):
+                open_item_action = menu.addAction("Open Image File")
+                open_item_action.triggered.connect(lambda *args, p=job.download_path: os.startfile(p) if os.name == 'nt' else subprocess.run(["xdg-open", p]))
+                actions.append(open_item_action)
+                
+                copy_path_action = menu.addAction("Copy Download Path")
+                copy_path_action.triggered.connect(lambda *args, p=job.download_path: QApplication.clipboard().setText(p))
+                actions.append(copy_path_action)
+            menu.addSeparator()
+
+        add_row_action = menu.addAction("Add New Row")
+        add_row_action.triggered.connect(self._context_add_row)
+        actions.append(add_row_action)
+        
+        if selected_rows:
+            edit_row_action = menu.addAction("Edit Selected Row...")
+            edit_row_action.triggered.connect(self._context_edit_row)
+            actions.append(edit_row_action)
+            
+            duplicate_row_action = menu.addAction("Copy/Duplicate Selected Rows")
+            duplicate_row_action.triggered.connect(self._context_duplicate_rows)
+            actions.append(duplicate_row_action)
+            
+        menu.addSeparator()
+
+        relaunch_action = menu.addAction("Relaunch Selected Rows (Manual Browser)")
+        relaunch_action.triggered.connect(self._context_relaunch_manual)
+        actions.append(relaunch_action)
+
+        remove_action = menu.addAction("Clear from List")
+        remove_action.triggered.connect(self._context_clear_rows)
+        actions.append(remove_action)
+        
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _context_add_row(self):
+        dialog = JobDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            data = dialog.get_data()
+            new_job = PromptJob(
+                index=len(self.jobs) + 1,
+                prompt=data["prompt"],
+                video_title=data["video_title"],
+                caption="mockup",
+                status=JobStatus.PENDING
+            )
+            self.jobs.append(new_job)
+            self._refresh_table()
+            self._update_stats()
+
+    def _context_edit_row(self):
+        selected = list(set(idx.row() for idx in self.table.selectedIndexes()))
+        if not selected:
+            return
+        row = selected[0]
+        if 0 <= row < len(self.jobs):
+            job = self.jobs[row]
+            dialog = JobDialog(self, job)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                data = dialog.get_data()
+                job.prompt = data["prompt"]
+                job.video_title = data["video_title"]
+                self._refresh_table()
+
+    def _context_duplicate_rows(self):
+        selected = sorted(list(set(idx.row() for idx in self.table.selectedIndexes())))
+        if not selected:
+            return
+        for r in selected:
+            job = self.jobs[r]
+            dup = PromptJob(
+                index=len(self.jobs) + 1,
+                prompt=job.prompt,
+                video_title=job.video_title,
+                caption=job.caption,
+                status=JobStatus.PENDING
+            )
+            self.jobs.append(dup)
+        self._refresh_table()
+        self._update_stats()
+
+    def _context_relaunch_manual(self):
+        selected = set(idx.row() for idx in self.table.selectedIndexes())
+        for r in selected:
+            self._relaunch_job_manual(self.jobs[r].index)
+
+    def _context_clear_rows(self):
+        selected = sorted(list(set(idx.row() for idx in self.table.selectedIndexes())), reverse=True)
+        for r in selected:
+            self.jobs.pop(r)
+        # Re-index
+        for idx, job in enumerate(self.jobs):
+            job.index = idx + 1
+        self._refresh_table()
+        self._update_stats()
+
+    def _toggle_select_all(self):
+        self.table.selectAll()
+
+    def _download_selected_jobs(self):
+        QMessageBox.information(self, "Info", "Batch generation automatically downloads completed items.")
+
+    def _retry_all_failed_jobs(self):
+        failed_jobs = [j for j in self.jobs if j.status == JobStatus.FAILED]
+        for job in failed_jobs:
+            job.status = JobStatus.PENDING
+            job.error = None
+        self._refresh_table()
+        self._start_batch()
+
+    def _apply_table_filters(self):
+        checked_statuses = self.combo_filter_status.checkedItems()
+        search_text = self.edit_search.text().strip().lower()
+        
+        self.table.blockSignals(True)
+        for row in range(self.table.rowCount()):
+            job = self.jobs[row]
+            status_match = "All Statuses" in checked_statuses or job.status.value.upper() in [s.upper() for s in checked_statuses]
+            search_match = not search_text or search_text in job.video_title.lower() or search_text in job.prompt.lower()
+            
+            self.table.setRowHidden(row, not (status_match and search_match))
+        self.table.blockSignals(False)
+
+    def _clear_filters(self):
+        self.edit_search.clear()
+        self.combo_filter_status.clear()
+        self.combo_filter_status.add_checkable_item("All Statuses", checked=True)
+        self.combo_filter_status.add_checkable_item("Pending", checked=True)
+        self.combo_filter_status.add_checkable_item("Running", checked=True)
+        self.combo_filter_status.add_checkable_item("Completed", checked=True)
+        self.combo_filter_status.add_checkable_item("Failed", checked=True)
+        self.combo_filter_status.add_checkable_item("Cancelled", checked=True)
+        self._apply_table_filters()

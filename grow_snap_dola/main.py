@@ -24,7 +24,7 @@ from dola_automation.main_window import MainWindow
 from dola_automation.logger import logger, setup_logger
 from dola_automation.updater import check_for_updates, DEFAULT_UPDATE_URL
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 def get_resource_path(relative_path: str) -> Path:
     """ Get absolute path to resource, works for dev and for PyInstaller """
