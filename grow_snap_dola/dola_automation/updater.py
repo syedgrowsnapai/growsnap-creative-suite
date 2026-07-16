@@ -26,9 +26,17 @@ def check_for_updates(current_version: str, update_url: str = DEFAULT_UPDATE_URL
     Checks if a newer version is available.
     Returns (has_update, update_data, error_message)
     """
+    import time
+    # Bypass GitHub CDN cache by appending a timestamp query parameter
+    url_to_fetch = update_url
+    if "?" in url_to_fetch:
+        url_to_fetch += f"&t={int(time.time())}"
+    else:
+        url_to_fetch += f"?t={int(time.time())}"
+        
     try:
         req = urllib.request.Request(
-            update_url, 
+            url_to_fetch, 
             headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) GrowSnapUpdateEngine/1.0'}
         )
         with urllib.request.urlopen(req, timeout=5) as response:
