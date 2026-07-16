@@ -138,7 +138,9 @@ def launch_installer(installer_path: str) -> bool:
                     pass
                 
                 bat_content = f"""@echo off
-timeout /t 2 /nobreak >nul
+chcp 65001 >nul
+echo Waiting for application to exit...
+timeout /t 5 /nobreak >nul
 echo Performing automatic update...
 powershell -Command "Expand-Archive -Path '{installer_path}' -DestinationPath '{temp_dir}\\growsnap_extracted' -Force"
 xcopy /E /Y /I "{temp_dir}\\growsnap_extracted\\{root_folder}\\*" "{app_dir}\\"
