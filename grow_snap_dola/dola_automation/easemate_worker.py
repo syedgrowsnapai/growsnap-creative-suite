@@ -100,18 +100,24 @@ class EasemateBrowserWorker:
             try:
                 self.log_info("Navigating to easemate.ai...")
                 page.goto("https://www.easemate.ai/ai-image-generator")
-                page.wait_for_timeout(3000)
                 
                 # Check auth state (warning if Log In button is visible)
-                if page.locator("button:has-text('Log In'), button:has-text('Sign Up'), button:has-text('Sign In')").first.is_visible():
-                    self.log_info("Warning: Easemate login buttons detected. Headless might run unauthenticated.")
-                    
-                # Wait for loading spinner to finish
-                self.log_info("Waiting for page loading spinner to finish...")
                 try:
-                    page.wait_for_selector(".ant-spin-spinning", state="detached", timeout=20000)
+                    if page.locator("button:has-text('Log In'), button:has-text('Sign Up'), button:has-text('Sign In')").first.is_visible():
+                        self.log_info("Warning: Easemate login buttons detected. Headless might run unauthenticated.")
                 except Exception:
-                    self.log_info("Timeout waiting for loading spinner to detach, continuing anyway.")
+                    pass
+                    
+                # Explicitly wait up to 45 seconds for page components to load
+                self.log_info("Waiting up to 45 seconds for EaseMate UI components to load...")
+                try:
+                    page.wait_for_selector("button:has-text('Text to Image'), text='Text to Image'", state="visible", timeout=45000)
+                    self.log_info("EaseMate UI components detected successfully.")
+                except Exception as e:
+                    self.log_info(f"Warning: Timeout waiting for main UI components: {e}")
+                    
+                # Additional wait buffer as requested for stability
+                page.wait_for_timeout(3000)
 
                 # Switch to Text to Image tab to reveal prompt input
                 self.log_info("Switching to Text to Image mode...")
@@ -317,20 +323,34 @@ class EasemateBatchRunner(QThread):
         def run_single_job(job_obj):
             job_obj.status = JobStatus.RUNNING
             self.job_finished.emit(job_obj.index, False)
-            self.job_progress.emit(job_obj.index, f"Processing Job #{job_obj.index}...")
             
-            # Fresh worker instance to avoid lock conflicts
-            worker = EasemateBrowserWorker(self.settings, on_progress=lambda p, msg: self.job_progress.emit(job_obj.index, msg))
-            with self.lock:
+            success = False
+            max_attempts = 3
+            for attempt in range(max_attempts):
                 if self._stop:
-                    return
-                self.active_workers[job_obj.index] = worker
+                    break
+                    
+                self.job_progress.emit(job_obj.index, f"Processing Job #{job_obj.index} (Attempt {attempt+1}/{max_attempts})...")
                 
-            success = worker.run_job(job_obj, self.model, self.ratio, self.res, thread_id=threading.get_ident())
-            
-            with self.lock:
-                if job_obj.index in self.active_workers:
-                    del self.active_workers[job_obj.index]
+                # Fresh worker instance to avoid lock conflicts
+                worker = EasemateBrowserWorker(self.settings, on_progress=lambda p, msg: self.job_progress.emit(job_obj.index, msg))
+                with self.lock:
+                    if self._stop:
+                        break
+                    self.active_workers[job_obj.index] = worker
+                    
+                t_id = f"{threading.get_ident()}_{attempt}"
+                success = worker.run_job(job_obj, self.model, self.ratio, self.res, thread_id=t_id)
+                
+                with self.lock:
+                    if job_obj.index in self.active_workers:
+                        del self.active_workers[job_obj.index]
+                        
+                if success:
+                    break
+                else:
+                    self.job_progress.emit(job_obj.index, f"Job #{job_obj.index} failed on attempt {attempt+1}. Retrying in 5 seconds...")
+                    time.sleep(5)
                     
             if success:
                 job_obj.status = JobStatus.COMPLETED
