@@ -213,6 +213,22 @@ class EasemateAIAutomationWidget(QWidget):
         ingest_lay.addLayout(btn_row)
         left_layout.addWidget(ingest_group)
         
+        # Bottom Operational Panel (Moved here to prevent overflow/cutoff issues)
+        run_row = QHBoxLayout()
+        self.btn_start = QPushButton("Start batch")
+        self.btn_start.setObjectName("primary")
+        self.btn_start.clicked.connect(self._start_batch)
+        self.btn_pause = QPushButton("Pause")
+        self.btn_pause.setEnabled(False)
+        self.btn_pause.clicked.connect(self._pause_batch)
+        self.btn_stop = QPushButton("Stop")
+        self.btn_stop.setEnabled(False)
+        self.btn_stop.clicked.connect(self._stop_batch)
+        run_row.addWidget(self.btn_start)
+        run_row.addWidget(self.btn_pause)
+        run_row.addWidget(self.btn_stop)
+        left_layout.addLayout(run_row)
+        
         left_scroll.setWidget(left)
         splitter.addWidget(left_scroll)
 
@@ -385,22 +401,6 @@ class EasemateAIAutomationWidget(QWidget):
 
         splitter.addWidget(self.right_tabs)
         splitter.setSizes([350, 650])
-
-        # Bottom Operational Panel
-        run_row = QHBoxLayout()
-        self.btn_start = QPushButton("Start batch")
-        self.btn_start.setObjectName("primary")
-        self.btn_start.clicked.connect(self._start_batch)
-        self.btn_pause = QPushButton("Pause")
-        self.btn_pause.setEnabled(False)
-        self.btn_pause.clicked.connect(self._pause_batch)
-        self.btn_stop = QPushButton("Stop")
-        self.btn_stop.setEnabled(False)
-        self.btn_stop.clicked.connect(self._stop_batch)
-        run_row.addWidget(self.btn_start)
-        run_row.addWidget(self.btn_pause)
-        run_row.addWidget(self.btn_stop)
-        layout.addLayout(run_row)
 
         self._refresh_profiles()
 
