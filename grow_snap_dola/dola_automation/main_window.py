@@ -744,7 +744,10 @@ class MainWindow(QMainWindow):
         lic_lbl.setStyleSheet("color: #2ecc71; font-weight: bold; background: rgba(46, 204, 113, 0.08); border: 1px solid rgba(46, 204, 113, 0.22); border-radius: 6px; padding: 5px 12px; font-size: 11px;")
         header_layout.addWidget(lic_lbl)
         
-        from dola_automation.version import APP_VERSION
+        try:
+            from dola_automation.version import APP_VERSION
+        except ImportError:
+            APP_VERSION = "1.0.8"
         version_lbl = QLabel(f"V{APP_VERSION} PREMIUM", self)
         version_lbl.setObjectName("version_badge")
         header_layout.addWidget(version_lbl)
@@ -3735,7 +3738,10 @@ class MainWindow(QMainWindow):
 
     def _manual_update_check(self):
         self._log("Checking for updates online...")
-        from dola_automation.version import APP_VERSION
+        try:
+            from dola_automation.version import APP_VERSION
+        except ImportError:
+            APP_VERSION = "1.0.8"
         from dola_automation.updater import check_for_updates
         
         has_update, update_data, error_msg = check_for_updates(APP_VERSION)
