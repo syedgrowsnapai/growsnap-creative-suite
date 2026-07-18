@@ -129,7 +129,7 @@ class EasemateBrowserWorker:
                 # Explicitly wait up to 45 seconds for page components to load
                 self.log_info("Waiting up to 45 seconds for EaseMate UI components to load...")
                 try:
-                    page.wait_for_selector("button:has-text('Text to Image'), text='Text to Image'", state="visible", timeout=45000)
+                    page.wait_for_selector("xpath=//button[contains(., 'Text to Image')] | //span[text()='Text to Image']", state="visible", timeout=45000)
                     self.log_info("EaseMate UI components detected successfully.")
                 except Exception as e:
                     self.log_info(f"Warning: Timeout waiting for main UI components: {e}")
@@ -139,7 +139,7 @@ class EasemateBrowserWorker:
 
                 # Switch to Text to Image tab to reveal prompt input
                 self.log_info("Switching to Text to Image mode...")
-                text_to_image_tab = page.locator("button:has-text('Text to Image'), text='Text to Image'").first
+                text_to_image_tab = page.locator("xpath=//button[contains(., 'Text to Image')] | //span[text()='Text to Image']").first
                 if text_to_image_tab.is_visible():
                     text_to_image_tab.click()
                     page.wait_for_timeout(1000)

@@ -55,7 +55,15 @@ if %errorlevel% neq 0 (
 echo Installing required packages...
 call .venv\Scripts\activate.bat
 python -m pip install --upgrade pip
+if %errorlevel% neq 0 (
+    echo [Warning] Direct pip upgrade failed, retrying with trusted host flags...
+    python -m pip install --upgrade pip --trusted-host pypi.org --trusted-host files.pythonhosted.org --trusted-host pypi.python.org
+)
 pip install pyqt6 patchright requests yt-dlp gTTS
+if %errorlevel% neq 0 (
+    echo [Warning] Standard package install failed, retrying with trusted host flags...
+    pip install pyqt6 patchright requests yt-dlp gTTS --trusted-host pypi.org --trusted-host files.pythonhosted.org --trusted-host pypi.python.org
+)
 
 :: Create Desktop Shortcut on first run
 set "DESKTOP_DIR=%userprofile%\Desktop"

@@ -6,8 +6,8 @@ if [ ! -d ".venv" ]; then
     echo "[First Run] Initializing Python virtual environment..."
     python3 -m venv .venv
     source .venv/bin/activate
-    python3 -m pip install --upgrade pip
-    pip install pyqt6 patchright requests yt-dlp gTTS
+    python3 -m pip install --upgrade pip || python3 -m pip install --upgrade pip --trusted-host pypi.org --trusted-host files.pythonhosted.org --trusted-host pypi.python.org
+    pip install pyqt6 patchright requests yt-dlp gTTS || pip install pyqt6 patchright requests yt-dlp gTTS --trusted-host pypi.org --trusted-host files.pythonhosted.org --trusted-host pypi.python.org
 else
     source .venv/bin/activate
 fi
