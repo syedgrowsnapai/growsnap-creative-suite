@@ -41,7 +41,16 @@ for %%V in (312 311 310 313) do (
 
 echo [Installer] Python is not installed or not on PATH.
 echo Downloading Python 3.11.9 installer for Windows...
-powershell -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile 'python_setup.exe'"
+curl -s -L -o "python_setup.exe" "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
+if not exist python_setup.exe (
+    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object System.Net.WebClient).DownloadFile('https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe', 'python_setup.exe')"
+)
+if exist python_setup.exe (
+    for %%I in (python_setup.exe) do if %%~zI equ 0 del python_setup.exe
+)
+if not exist python_setup.exe (
+    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile 'python_setup.exe' -UseBasicParsing"
+)
 echo Launching Python installer.
 echo.
 echo IMPORTANT: You MUST check "Add python.exe to PATH" at the bottom of the installer window!
@@ -86,10 +95,24 @@ exit /b
 :: 2. Download code from GitHub
 echo [Installer] Downloading code package from GitHub (%GITHUB_USER%/%GITHUB_REPO%)...
 set REPO_ZIP_URL=https://github.com/%GITHUB_USER%/%GITHUB_REPO%/archive/refs/heads/%BRANCH%.zip
-powershell -Command "Invoke-WebRequest -Uri '%REPO_ZIP_URL%' -OutFile 'growsnap.zip'"
+
+curl -s -L -o "growsnap.zip" "%REPO_ZIP_URL%"
+if not exist growsnap.zip (
+    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object System.Net.WebClient).DownloadFile('%REPO_ZIP_URL%', 'growsnap.zip')"
+)
+if exist growsnap.zip (
+    for %%I in (growsnap.zip) do if %%~zI equ 0 del growsnap.zip
+)
+if not exist growsnap.zip (
+    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%REPO_ZIP_URL%' -OutFile 'growsnap.zip' -UseBasicParsing"
+    if exist growsnap.zip (
+        for %%I in (growsnap.zip) do if %%~zI equ 0 del growsnap.zip
+    )
+)
 
 if not exist growsnap.zip (
-    echo [ERROR] Failed to download from GitHub. Please check your repository URL settings.
+    echo [ERROR] Failed to download code package from GitHub.
+    echo Connection was refused or interrupted. Please check your internet connection/firewall or download main.zip manually from https://github.com/%GITHUB_USER%/%GITHUB_REPO%/archive/refs/heads/%BRANCH%.zip
     pause
     exit /b
 )
