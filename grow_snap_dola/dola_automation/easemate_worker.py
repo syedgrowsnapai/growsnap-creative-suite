@@ -115,6 +115,25 @@ class EasemateBrowserWorker:
             try:
                 page = context.pages[0] if context.pages else context.new_page()
                 
+                # Intercept and abort third-party trackers, ads, and analytics to speed up React hydration
+                try:
+                    def handle_route(route):
+                        url = route.request.url.lower()
+                        blocked_patterns = [
+                            "google-analytics", "googletagmanager", "facebook.net", 
+                            "facebook.com/tr", "connect.facebook", "tiktok.com/analytics", 
+                            "hotjar", "mixpanel", "clarity.ms", "doubleclick", 
+                            "googleadservices", "amplitude", "sentry.io",
+                            "analytics", "pixel"
+                        ]
+                        if any(p in url for p in blocked_patterns):
+                            route.abort()
+                        else:
+                            route.continue_()
+                    page.route("**/*", handle_route)
+                except Exception as e:
+                    self.log_info(f"Warning: Failed to setup adblock/tracker filter: {e}")
+
                 loading_timeout_sec = getattr(self.settings, 'easemate_loading_timeout_sec', 300)
                 loading_timeout_ms = loading_timeout_sec * 1000
                 page.set_default_timeout(loading_timeout_ms)
@@ -134,6 +153,13 @@ class EasemateBrowserWorker:
                 try:
                     page.wait_for_selector("xpath=//button[contains(., 'Text to Image')] | //span[text()='Text to Image']", state="visible", timeout=loading_timeout_ms)
                     self.log_info("EaseMate UI components detected successfully.")
+                    
+                    # Zoom out to 80% to ensure elements fit on smaller displays
+                    try:
+                        page.evaluate("document.body.style.zoom = '0.8'")
+                        self.log_info("Zoomed viewport out to 80% for layout visibility.")
+                    except Exception:
+                        pass
                 except Exception as e:
                     self.log_info(f"Warning: Timeout waiting for main UI components: {e}")
                     
@@ -144,6 +170,10 @@ class EasemateBrowserWorker:
                 self.log_info("Switching to Text to Image mode...")
                 text_to_image_tab = page.locator("xpath=//button[contains(., 'Text to Image')] | //span[text()='Text to Image']").first
                 if text_to_image_tab.is_visible():
+                    try:
+                        text_to_image_tab.scroll_into_view_if_needed()
+                    except Exception:
+                        pass
                     text_to_image_tab.click()
                     page.wait_for_timeout(1000)
                 else:
@@ -168,6 +198,10 @@ class EasemateBrowserWorker:
                 
                 if trigger:
                     self.log_info("Clicking model dropdown trigger...")
+                    try:
+                        trigger.scroll_into_view_if_needed()
+                    except Exception:
+                        pass
                     trigger.click()
                     page.wait_for_timeout(1500)
                     
@@ -187,6 +221,10 @@ class EasemateBrowserWorker:
                             
                     if model_option:
                         self.log_info(f"Selecting option: {model}")
+                        try:
+                            model_option.scroll_into_view_if_needed()
+                        except Exception:
+                            pass
                         model_option.click()
                         page.wait_for_timeout(1500)
                     else:
@@ -205,6 +243,10 @@ class EasemateBrowserWorker:
                     except Exception:
                         pass
                 if textarea.is_visible():
+                    try:
+                        textarea.scroll_into_view_if_needed()
+                    except Exception:
+                        pass
                     textarea.click()
                     textarea.fill("")
                     textarea.fill(job.prompt)
@@ -226,6 +268,10 @@ class EasemateBrowserWorker:
                         ratio_btn = btn
                         break
                 if ratio_btn:
+                    try:
+                        ratio_btn.scroll_into_view_if_needed()
+                    except Exception:
+                        pass
                     ratio_btn.click()
                     page.wait_for_timeout(500)
                 else:
@@ -245,10 +291,18 @@ class EasemateBrowserWorker:
                         res_trigger = loc
                         break
                 if res_trigger:
+                    try:
+                        res_trigger.scroll_into_view_if_needed()
+                    except Exception:
+                        pass
                     res_trigger.click()
                     page.wait_for_timeout(500)
                     res_option = page.locator(f"text='{resolution_ratio}'").first
                     if res_option.is_visible():
+                        try:
+                            res_option.scroll_into_view_if_needed()
+                        except Exception:
+                            pass
                         res_option.click()
                         page.wait_for_timeout(500)
                     else:
@@ -259,6 +313,18 @@ class EasemateBrowserWorker:
                 # 5. Submit / Generate
                 self.log_info("Clicking Generate button...")
                 gen_btn = page.locator("button:has-text('Generate'), button:has-text('Create'), button[type='submit']").first
+                
+                # Perform window scrolling to the bottom to ensure fully visible UI
+                try:
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                except Exception:
+                    pass
+                
+                try:
+                    gen_btn.scroll_into_view_if_needed()
+                except Exception:
+                    pass
+                    
                 gen_btn.click()
                 
                 # Wait for potential CAPTCHA verification / Submission progress (up to 45 seconds)
