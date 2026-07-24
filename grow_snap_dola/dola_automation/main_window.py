@@ -1693,6 +1693,7 @@ class MainWindow(QMainWindow):
         s.selected_hook_id = self.combo_select_hook.currentData() or -1
         s.active_profile_name = self.combo_profiles.currentText() or 'Default'
         s.auto_rotate_profiles = self.chk_auto_rotate.isChecked()
+        s.easemate_loading_timeout_sec = getattr(self.settings, 'easemate_loading_timeout_sec', 300)
         
         # Coordinates from right page spinboxes and preset from combo
         s.watermark_blur_x = self.spin_blur_x.value()

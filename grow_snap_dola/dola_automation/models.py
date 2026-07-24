@@ -49,6 +49,7 @@ class AutomationSettings:
     active_profile_name: str = 'Default'
     auto_rotate_profiles: bool = False
     profile_list_str: str = ''
+    easemate_loading_timeout_sec: int = 300
 
 @dataclass
 class PromptJob:

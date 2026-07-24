@@ -385,6 +385,12 @@ class EasemateAIAutomationWidget(QWidget):
         self.spin_threads.setRange(1, 16)
         self.spin_threads.setValue(1)
         prof_lay.addWidget(self.spin_threads, 1, 3)
+
+        prof_lay.addWidget(QLabel("Page Load Timeout (sec):", self), 2, 0)
+        self.spin_loading_timeout = QSpinBox(self)
+        self.spin_loading_timeout.setRange(10, 600)
+        self.spin_loading_timeout.setValue(getattr(self.settings, 'easemate_loading_timeout_sec', 300))
+        prof_lay.addWidget(self.spin_loading_timeout, 2, 1, 1, 3)
         tab_settings_lay.addWidget(profile_group)
         
         tab_settings_lay.addStretch()
@@ -602,6 +608,7 @@ class EasemateAIAutomationWidget(QWidget):
         self.settings.download_dir = Path(self.lbl_dl_path_show.text())
         self.settings.headless = self.chk_headless.isChecked()
         self.settings.active_profile_name = self.combo_profiles.currentText() or "Default"
+        self.settings.easemate_loading_timeout_sec = self.spin_loading_timeout.value()
 
         model = self.combo_model.currentText()
         ratio = self.combo_ratio.currentText()

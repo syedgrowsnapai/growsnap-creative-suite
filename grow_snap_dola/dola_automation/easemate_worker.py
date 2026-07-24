@@ -114,10 +114,13 @@ class EasemateBrowserWorker:
             
             try:
                 page = context.pages[0] if context.pages else context.new_page()
-                page.set_default_timeout(60000)
+                
+                loading_timeout_sec = getattr(self.settings, 'easemate_loading_timeout_sec', 300)
+                loading_timeout_ms = loading_timeout_sec * 1000
+                page.set_default_timeout(loading_timeout_ms)
                 
                 self.log_info("Navigating to easemate.ai...")
-                page.goto("https://www.easemate.ai/ai-image-generator")
+                page.goto("https://www.easemate.ai/ai-image-generator", wait_until="domcontentloaded", timeout=loading_timeout_ms)
                 
                 # Check auth state (warning if Log In button is visible)
                 try:
@@ -126,10 +129,10 @@ class EasemateBrowserWorker:
                 except Exception:
                     pass
                     
-                # Explicitly wait up to 45 seconds for page components to load
-                self.log_info("Waiting up to 45 seconds for EaseMate UI components to load...")
+                # Explicitly wait up to dynamic timeout for page components to load
+                self.log_info(f"Waiting up to {loading_timeout_sec} seconds for EaseMate UI components to load...")
                 try:
-                    page.wait_for_selector("xpath=//button[contains(., 'Text to Image')] | //span[text()='Text to Image']", state="visible", timeout=45000)
+                    page.wait_for_selector("xpath=//button[contains(., 'Text to Image')] | //span[text()='Text to Image']", state="visible", timeout=loading_timeout_ms)
                     self.log_info("EaseMate UI components detected successfully.")
                 except Exception as e:
                     self.log_info(f"Warning: Timeout waiting for main UI components: {e}")
