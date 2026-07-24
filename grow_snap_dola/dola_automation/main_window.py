@@ -2032,7 +2032,10 @@ class MainWindow(QMainWindow):
         
         def run_headed_browser():
             try:
-                from playwright.sync_api import sync_playwright
+                try:
+                    from patchright.sync_api import sync_playwright
+                except ImportError:
+                    from playwright.sync_api import sync_playwright
                 with sync_playwright() as p:
                     launch_args = ["--disable-blink-features=AutomationControlled"]
                     try:
