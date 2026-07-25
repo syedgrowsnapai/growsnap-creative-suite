@@ -362,36 +362,25 @@ class EasemateAIAutomationWidget(QWidget):
         gen_lay.addWidget(self.lbl_dl_path_show, 4, 0, 1, 2)
         tab_settings_lay.addWidget(gen_params_group)
 
-        # Profile Group
-        profile_group = QGroupBox("EASEMATE PROFILE MANAGER", self)
-        prof_lay = QGridLayout(profile_group)
-        prof_lay.addWidget(QLabel("Active Profile:", self), 0, 0)
-        self.combo_profiles = QComboBox(self)
-        prof_lay.addWidget(self.combo_profiles, 0, 1)
+        # Automation Settings Group
+        automation_group = QGroupBox("AUTOMATION SETTINGS", self)
+        auto_lay = QGridLayout(automation_group)
         
-        btn_new_prof = QPushButton("+ New", self)
-        btn_new_prof.clicked.connect(self._create_profile)
-        prof_lay.addWidget(btn_new_prof, 0, 2)
-
-        btn_login = QPushButton("🔑 Login (headed)", self)
-        btn_login.clicked.connect(self._login_headed)
-        prof_lay.addWidget(btn_login, 0, 3)
-
         self.chk_headless = QCheckBox("Run Headless Browser", self)
-        prof_lay.addWidget(self.chk_headless, 1, 0, 1, 2)
-
-        prof_lay.addWidget(QLabel("Concurrent Tasks:", self), 1, 2)
+        auto_lay.addWidget(self.chk_headless, 0, 0, 1, 2)
+ 
+        auto_lay.addWidget(QLabel("Concurrent Tasks:", self), 0, 2)
         self.spin_threads = QSpinBox(self)
         self.spin_threads.setRange(1, 16)
         self.spin_threads.setValue(1)
-        prof_lay.addWidget(self.spin_threads, 1, 3)
-
-        prof_lay.addWidget(QLabel("Page Load Timeout (sec):", self), 2, 0)
+        auto_lay.addWidget(self.spin_threads, 0, 3)
+ 
+        auto_lay.addWidget(QLabel("Page Load Timeout (sec):", self), 1, 0)
         self.spin_loading_timeout = QSpinBox(self)
         self.spin_loading_timeout.setRange(10, 600)
         self.spin_loading_timeout.setValue(getattr(self.settings, 'easemate_loading_timeout_sec', 300))
-        prof_lay.addWidget(self.spin_loading_timeout, 2, 1, 1, 3)
-        tab_settings_lay.addWidget(profile_group)
+        auto_lay.addWidget(self.spin_loading_timeout, 1, 1, 1, 3)
+        tab_settings_lay.addWidget(automation_group)
         
         tab_settings_lay.addStretch()
         self.right_tabs.addTab(self.tab_settings, "Settings")
@@ -607,7 +596,7 @@ class EasemateAIAutomationWidget(QWidget):
         # Set runner configs
         self.settings.download_dir = Path(self.lbl_dl_path_show.text())
         self.settings.headless = self.chk_headless.isChecked()
-        self.settings.active_profile_name = self.combo_profiles.currentText() or "Default"
+        self.settings.active_profile_name = "Easemate_Free"
         self.settings.easemate_loading_timeout_sec = self.spin_loading_timeout.value()
 
         model = self.combo_model.currentText()
