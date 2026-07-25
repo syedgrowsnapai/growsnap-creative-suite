@@ -2037,7 +2037,7 @@ class MainWindow(QMainWindow):
                 except ImportError:
                     from playwright.sync_api import sync_playwright
                 with sync_playwright() as p:
-                    launch_args = ["--disable-blink-features=AutomationControlled", "--disable-quic", "--ignore-certificate-errors"]
+                    launch_args = ["--disable-blink-features=AutomationControlled", "--disable-quic", "--ignore-certificate-errors", "--max-connections-per-host=4", "--max-total-connections=10"]
                     try:
                         # Attempt to use native Chrome browser to permit Google Login authentication
                         context = p.chromium.launch_persistent_context(

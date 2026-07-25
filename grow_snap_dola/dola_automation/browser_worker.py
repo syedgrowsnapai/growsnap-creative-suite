@@ -156,7 +156,7 @@ class DolaBrowserWorker:
         success = False
         
         with sync_playwright() as p:
-            launch_args = ["--disable-quic", "--ignore-certificate-errors"]
+            launch_args = ["--disable-quic", "--ignore-certificate-errors", "--max-connections-per-host=4", "--max-total-connections=10"]
             if os.name != 'nt':
                 launch_args.extend(["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
             if not self.settings.headless:
