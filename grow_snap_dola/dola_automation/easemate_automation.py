@@ -811,6 +811,20 @@ class EasemateAIAutomationWidget(QWidget):
                 
         threading.Thread(target=run_headed, daemon=True).start()
 
+    def _pick_download_dir(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Download Folder", self.lbl_dl_path_show.text())
+        if folder:
+            self.lbl_dl_path_show.setText(folder)
+
+    def _open_download_dir(self):
+        path = self.lbl_dl_path_show.text()
+        if os.path.exists(path):
+            if os.name == 'nt':
+                os.startfile(path)
+            else:
+                import subprocess
+                subprocess.run(["xdg-open", path])
+
     # Table Actions Context Menu
     def _on_table_context_menu(self, pos):
         menu = QMenu(self)
