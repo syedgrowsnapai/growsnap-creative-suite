@@ -156,7 +156,7 @@ class DolaBrowserWorker:
         success = False
         
         with sync_playwright() as p:
-            launch_args = []
+            launch_args = ["--disable-quic", "--ignore-certificate-errors"]
             if os.name != 'nt':
                 launch_args.extend(["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
             if not self.settings.headless:
@@ -167,6 +167,7 @@ class DolaBrowserWorker:
                     user_data_dir=str(profile_dir),
                     headless=self.settings.headless,
                     viewport={"width": 1280, "height": 800},
+                    ignore_https_errors=True,
                     args=launch_args
                 )
                 self._context = context
