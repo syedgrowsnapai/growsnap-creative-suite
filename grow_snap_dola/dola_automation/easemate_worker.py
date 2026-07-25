@@ -20,7 +20,7 @@ from dola_automation.models import AutomationSettings, PromptJob, JobStatus
 from dola_automation.logger import logger
 
 class EasemateBrowserWorker:
-    _use_chrome_channel = True
+    _use_chrome_channel = False
     
     def __init__(self, settings: AutomationSettings, on_progress=None):
         self.settings = settings
@@ -66,7 +66,7 @@ class EasemateBrowserWorker:
             profile_dir = base_dir
             profile_dir.mkdir(parents=True, exist_ok=True)
             
-        use_chrome = getattr(EasemateBrowserWorker, '_use_chrome_channel', True)
+        use_chrome = getattr(EasemateBrowserWorker, '_use_chrome_channel', False)
         
         success = False
         try:
