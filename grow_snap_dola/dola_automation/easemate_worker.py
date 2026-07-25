@@ -116,25 +116,6 @@ class EasemateBrowserWorker:
             try:
                 page = context.pages[0] if context.pages else context.new_page()
                 
-                # Intercept and abort third-party trackers, ads, and analytics to speed up React hydration
-                try:
-                    def handle_route(route):
-                        url = route.request.url.lower()
-                        blocked_patterns = [
-                            "google-analytics", "googletagmanager", "facebook.net", 
-                            "facebook.com/tr", "connect.facebook", "tiktok.com/analytics", 
-                            "hotjar", "mixpanel", "clarity.ms", "doubleclick", 
-                            "googleadservices", "amplitude", "sentry.io",
-                            "analytics", "pixel"
-                        ]
-                        if any(p in url for p in blocked_patterns):
-                            route.abort()
-                        else:
-                            route.continue_()
-                    page.route("**/*", handle_route)
-                except Exception as e:
-                    self.log_info(f"Warning: Failed to setup adblock/tracker filter: {e}")
-
                 loading_timeout_sec = getattr(self.settings, 'easemate_loading_timeout_sec', 300)
                 loading_timeout_ms = loading_timeout_sec * 1000
                 page.set_default_timeout(loading_timeout_ms)
