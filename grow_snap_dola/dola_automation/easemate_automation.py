@@ -8,15 +8,16 @@ from PyQt6.QtWidgets import (
     QGroupBox, QPlainTextEdit, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QTabWidget, QComboBox, QCheckBox, QFileDialog,
     QMessageBox, QMenu, QDialog, QDialogButtonBox, QFormLayout, QSpinBox, QApplication,
-    QGridLayout, QInputDialog
+    QGridLayout, QInputDialog, QListWidget, QListWidgetItem
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QAction
 
 from dola_automation.models import AutomationSettings, PromptJob, JobStatus
 from dola_automation.new_tabs import CheckableComboBox, JobDialog
 from dola_automation.easemate_worker import EasemateBatchRunner
 from dola_automation.logger import logger
+from dola_automation.database import HistoryDatabase
 
 def parse_easemate_csv(content_or_path: str) -> list[tuple[str, str, str]]:
     """
@@ -99,10 +100,12 @@ def parse_easemate_csv(content_or_path: str) -> list[tuple[str, str, str]]:
 class EasemateAIAutomationWidget(QWidget):
     def __init__(self, parent=None, db_path=None, global_settings=None):
         super().__init__(parent)
-        self.db_path = db_path
+        self.db_path = db_path or (Path.home() / 'Documents' / 'easemate_video_automation' / 'history.db')
+        self.db = HistoryDatabase(self.db_path)
         self.settings = global_settings or AutomationSettings()
         self.jobs = []
         self.runner = None
+        self.current_session_id = None
         self._init_ui()
 
     def _stat_card(self, label_text: str, default_val: str) -> QFrame:
@@ -301,13 +304,35 @@ class EasemateAIAutomationWidget(QWidget):
         
         self.right_tabs.addTab(self.tab_current, "Current Jobs")
 
-        # Tab 2: History Logs
-        self.tab_logs = QWidget(self)
-        tab_logs_lay = QVBoxLayout(self.tab_logs)
+        # Tab 2: History & Logs (matching Dola)
+        self.tab_history_logs = QWidget(self)
+        tab_history_logs_lay = QHBoxLayout(self.tab_history_logs)
+        
+        history_group = QGroupBox("SESSION HISTORY", self)
+        history_layout = QVBoxLayout(history_group)
+        self.history_list = QListWidget(self)
+        history_layout.addWidget(self.history_list)
+        
+        history_btns = QHBoxLayout()
+        self.btn_refresh_history = QPushButton("Refresh", self)
+        self.btn_refresh_history.clicked.connect(self._refresh_history)
+        self.btn_load_session = QPushButton("Load session", self)
+        self.btn_load_session.clicked.connect(self._load_selected_session)
+        history_btns.addWidget(self.btn_refresh_history)
+        history_btns.addWidget(self.btn_load_session)
+        history_layout.addLayout(history_btns)
+        
+        tab_history_logs_lay.addWidget(history_group, 1)
+
+        log_group = QGroupBox("CONSOLE LOGS", self)
+        log_layout = QVBoxLayout(log_group)
         self.txt_log = QPlainTextEdit(self)
         self.txt_log.setReadOnly(True)
-        tab_logs_lay.addWidget(self.txt_log)
-        self.right_tabs.addTab(self.tab_logs, "History Logs")
+        log_layout.addWidget(self.txt_log)
+        
+        tab_history_logs_lay.addWidget(log_group, 2)
+        
+        self.right_tabs.addTab(self.tab_history_logs, "History & Logs")
 
         # Tab 3: Settings
         self.tab_settings = QWidget(self)
@@ -386,19 +411,76 @@ class EasemateAIAutomationWidget(QWidget):
         self.right_tabs.addTab(self.tab_settings, "Settings")
 
         # Tab 4: Lifetime History
-        self.tab_history = QWidget(self)
-        tab_history_lay = QVBoxLayout(self.tab_history)
-        self.table_history = QTableWidget(self)
-        self.table_history.setColumnCount(4)
-        self.table_history.setHorizontalHeaderLabels(["Timestamp", "Prompt", "Model", "Status"])
-        self.table_history.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        tab_history_lay.addWidget(self.table_history)
-        self.right_tabs.addTab(self.tab_history, "Lifetime History")
+        self.tab_lifetime = QWidget(self)
+        tab_lifetime_layout = QVBoxLayout(self.tab_lifetime)
+
+        lifetime_filter_layout = QHBoxLayout()
+        lifetime_filter_layout.addWidget(QLabel("Date:", self))
+        self.combo_lifetime_date = QComboBox(self)
+        self.combo_lifetime_date.addItems(["All Time", "Today", "Last 7 Days", "Last 30 Days"])
+        self.combo_lifetime_date.currentTextChanged.connect(self._refresh_lifetime_history)
+        lifetime_filter_layout.addWidget(self.combo_lifetime_date)
+
+        lifetime_filter_layout.addWidget(QLabel("Status:", self))
+        self.combo_lifetime_filter = QComboBox(self)
+        self.combo_lifetime_filter.addItems(["All", "completed", "failed", "pending", "submitted"])
+        self.combo_lifetime_filter.currentTextChanged.connect(self._refresh_lifetime_history)
+        lifetime_filter_layout.addWidget(self.combo_lifetime_filter)
+
+        lifetime_filter_layout.addWidget(QLabel("Limit:", self))
+        self.combo_lifetime_limit = QComboBox(self)
+        self.combo_lifetime_limit.addItems(["100", "500", "1000", "5000", "10000"])
+        self.combo_lifetime_limit.currentTextChanged.connect(self._refresh_lifetime_history)
+        lifetime_filter_layout.addWidget(self.combo_lifetime_limit)
+
+        lifetime_filter_layout.addWidget(QLabel("Search:", self))
+        self.edit_lifetime_search = QLineEdit(self)
+        self.edit_lifetime_search.setPlaceholderText("Search prompts...")
+        self.edit_lifetime_search.returnPressed.connect(self._refresh_lifetime_history)
+        lifetime_filter_layout.addWidget(self.edit_lifetime_search)
+
+        self.btn_lifetime_refresh = QPushButton("Refresh", self)
+        self.btn_lifetime_refresh.clicked.connect(self._refresh_lifetime_history)
+        lifetime_filter_layout.addWidget(self.btn_lifetime_refresh)
+
+        self.btn_lifetime_export = QPushButton("Export CSV", self)
+        self.btn_lifetime_export.clicked.connect(self._export_lifetime_csv)
+        lifetime_filter_layout.addWidget(self.btn_lifetime_export)
+
+        tab_lifetime_layout.addLayout(lifetime_filter_layout)
+
+        self.table_lifetime = QTableWidget(self)
+        self.table_lifetime.setColumnCount(8)
+        lifetime_headers = [
+            "DB ID", "Session", "Index", "Product Title", "Suffix", "Prompt", "Status", "Download Path"
+        ]
+        self.table_lifetime.setHorizontalHeaderLabels(lifetime_headers)
+        self.table_lifetime.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table_lifetime.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table_lifetime.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table_lifetime.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table_lifetime.customContextMenuRequested.connect(self._on_lifetime_table_context_menu)
+        tab_lifetime_layout.addWidget(self.table_lifetime)
+
+        lifetime_action_bar = QHBoxLayout()
+        self.btn_lifetime_select_all = QPushButton("Select All", self)
+        self.btn_lifetime_select_all.clicked.connect(self._toggle_lifetime_select_all)
+        self.btn_lifetime_download_selected = QPushButton("Download Selected", self)
+        self.btn_lifetime_download_selected.clicked.connect(self._download_lifetime_selected_jobs)
+        self.btn_lifetime_retry_failed = QPushButton("Retry All Failed", self)
+        self.btn_lifetime_retry_failed.clicked.connect(self._retry_lifetime_all_failed_jobs)
+        lifetime_action_bar.addWidget(self.btn_lifetime_select_all)
+        lifetime_action_bar.addWidget(self.btn_lifetime_download_selected)
+        lifetime_action_bar.addWidget(self.btn_lifetime_retry_failed)
+        tab_lifetime_layout.addLayout(lifetime_action_bar)
+
+        self.right_tabs.addTab(self.tab_lifetime, "Lifetime History")
 
         splitter.addWidget(self.right_tabs)
         splitter.setSizes([350, 650])
 
-        self._refresh_profiles()
+        self._refresh_history()
+        self._refresh_lifetime_history()
 
     def _translate_windows_path(self, path_str: str) -> str:
         path_str = path_str.strip().strip('"').strip("'")
@@ -599,12 +681,23 @@ class EasemateAIAutomationWidget(QWidget):
         self.settings.active_profile_name = "Easemate_Free"
         self.settings.easemate_loading_timeout_sec = self.spin_loading_timeout.value()
 
+        # Save session in database
+        session_name = f"Session {time.strftime('%Y-%m-%d %H:%M')}"
+        try:
+            self.current_session_id = self.db.create_session(session_name, self.jobs)
+        except Exception as de:
+            logger.warning(f"Failed to create database session: {de}")
+            self.current_session_id = None
+
         model = self.combo_model.currentText()
         ratio = self.combo_ratio.currentText()
         res = self.combo_resolution.currentText()
 
         # Start QThread BatchRunner
-        self.runner = EasemateBatchRunner(self.jobs, self.settings, model, ratio, res, self.spin_threads.value())
+        self.runner = EasemateBatchRunner(
+            self.jobs, self.settings, model, ratio, res, 
+            self.spin_threads.value(), db=self.db, session_id=self.current_session_id
+        )
         self.runner.job_progress.connect(self._on_runner_progress)
         self.runner.job_finished.connect(self._on_runner_finished)
         self.runner.batch_finished.connect(self._on_runner_done)
@@ -676,8 +769,7 @@ class EasemateAIAutomationWidget(QWidget):
         if not target_job:
             return
             
-        profile = self.combo_profiles.currentText() or "Default"
-        profile_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / profile
+        profile_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / 'Easemate_Free'
         profile_dir.mkdir(parents=True, exist_ok=True)
         
         self.txt_log.appendPlainText(f"[Manual] Launching browser for Job #{index}...")
@@ -691,22 +783,18 @@ class EasemateAIAutomationWidget(QWidget):
                     from playwright.sync_api import sync_playwright
 
                 with sync_playwright() as p:
-                    launch_args = ["--disable-blink-features=AutomationControlled"]
+                    launch_args = ["--disable-blink-features=AutomationControlled", "--disable-quic", "--ignore-certificate-errors", "--max-connections-per-host=4", "--max-total-connections=10"]
                     try:
                         context = p.chromium.launch_persistent_context(
                             user_data_dir=str(profile_dir),
                             headless=False,
-                            channel="chrome",
                             args=launch_args,
+                            ignore_https_errors=True,
                             viewport={"width": 1280, "height": 800}
                         )
-                    except Exception:
-                        context = p.chromium.launch_persistent_context(
-                            user_data_dir=str(profile_dir),
-                            headless=False,
-                            args=launch_args,
-                            viewport={"width": 1280, "height": 800}
-                        )
+                    except Exception as e:
+                        logger.error(f"Error launching persistent context: {e}")
+                        return
                     page = context.pages[0] if context.pages else context.new_page()
                     page.goto("https://www.easemate.ai/ai-image-generator")
                     
@@ -722,89 +810,6 @@ class EasemateAIAutomationWidget(QWidget):
                 logger.error(f"Error launching headed manual browser: {e}")
                 
         threading.Thread(target=run_headed, daemon=True).start()
-
-    # Settings and Profile Helpers
-    def _pick_download_dir(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Download Folder", self.lbl_dl_path_show.text())
-        if folder:
-            self.lbl_dl_path_show.setText(folder)
-
-    def _open_download_dir(self):
-        path = self.lbl_dl_path_show.text()
-        if os.path.exists(path):
-            if os.name == 'nt':
-                os.startfile(path)
-            else:
-                import subprocess
-                subprocess.run(["xdg-open", path])
-
-    def _refresh_profiles(self):
-        profiles_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles'
-        profiles_dir.mkdir(parents=True, exist_ok=True)
-        (profiles_dir / 'Default').mkdir(exist_ok=True)
-        
-        self.combo_profiles.clear()
-        for d in profiles_dir.iterdir():
-            if d.is_dir():
-                self.combo_profiles.addItem(d.name)
-
-    def _create_profile(self):
-        from PyQt6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "Create Profile", "Enter Easemate profile name:")
-        if ok and name.strip():
-            clean = "".join(c for c in name if c.isalnum() or c in (' ', '_')).strip()
-            if clean:
-                profiles_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles'
-                (profiles_dir / clean).mkdir(parents=True, exist_ok=True)
-                self._refresh_profiles()
-                self.combo_profiles.setCurrentText(clean)
-
-    def _login_headed(self):
-        profile = self.combo_profiles.currentText() or "Default"
-        profile_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / profile
-        
-        QMessageBox.information(
-            self, "Manual Login", 
-            f"A headed browser will open under profile '{profile}'.\n\n"
-            "Please login to easemate.ai, then close the browser to save your session."
-        )
-
-        def run_browser():
-            try:
-                # Try to use patchright for stealth, fallback to playwright
-                try:
-                    from patchright.sync_api import sync_playwright
-                except ImportError:
-                    from playwright.sync_api import sync_playwright
-
-                with sync_playwright() as p:
-                    launch_args = ["--disable-blink-features=AutomationControlled"]
-                    try:
-                        context = p.chromium.launch_persistent_context(
-                            user_data_dir=str(profile_dir),
-                            headless=False,
-                            channel="chrome",
-                            args=launch_args,
-                            viewport={"width": 1280, "height": 800}
-                        )
-                    except Exception:
-                        context = p.chromium.launch_persistent_context(
-                            user_data_dir=str(profile_dir),
-                            headless=False,
-                            args=launch_args,
-                            viewport={"width": 1280, "height": 800}
-                        )
-                    page = context.pages[0] if context.pages else context.new_page()
-                    try:
-                        page.goto("https://www.easemate.ai/ai-image-generator", timeout=15000)
-                    except Exception as ge:
-                        print("Initial navigation timeout/error, user can navigate manually:", ge)
-                    while len(context.pages) > 0:
-                        time.sleep(0.5)
-            except Exception as e:
-                print("Error opening headed browser:", e)
-
-        threading.Thread(target=run_browser, daemon=True).start()
 
     # Table Actions Context Menu
     def _on_table_context_menu(self, pos):
@@ -949,3 +954,212 @@ class EasemateAIAutomationWidget(QWidget):
         self.combo_filter_status.add_checkable_item("Failed", checked=True)
         self.combo_filter_status.add_checkable_item("Cancelled", checked=True)
         self._apply_table_filters()
+
+    # Session & Database Helpers (matching Dola)
+    def _refresh_history(self):
+        self.history_list.clear()
+        try:
+            sessions = self.db.list_sessions(limit=50)
+            for s in sessions:
+                lbl = f"ID: {s['id']} | {s['name']} (Completed: {s['completed_count']}, Failed: {s['failed_count']})"
+                item = QListWidgetItem(lbl)
+                item.setData(Qt.ItemDataRole.UserRole, s['id'])
+                self.history_list.addItem(item)
+        except Exception as e:
+            logger.error(f"Failed to refresh sessions: {e}")
+
+    def _load_selected_session(self):
+        curr = self.history_list.currentItem()
+        if not curr:
+            return
+        session_id = curr.data(Qt.ItemDataRole.UserRole)
+        self.current_session_id = session_id
+        try:
+            self.jobs = self.db.load_session_jobs(session_id)
+            self._refresh_table()
+            self._update_stats()
+            self.txt_log.appendPlainText(f"[Info] Loaded historic Session #{session_id} into workspace.")
+        except Exception as e:
+            logger.error(f"Failed to load session {session_id}: {e}")
+
+    def _refresh_lifetime_history(self):
+        limit = int(self.combo_lifetime_limit.currentText())
+        date_f = self.combo_lifetime_date.currentText()
+        status_f = self.combo_lifetime_filter.currentText()
+        search_t = self.edit_lifetime_search.text().strip()
+
+        try:
+            rows = self.db.get_all_jobs_with_filters(
+                status_filter=status_f,
+                search_text=search_t,
+                date_filter=date_f,
+                limit_val=limit
+            )
+
+            self.table_lifetime.setRowCount(len(rows))
+            for idx, row in enumerate(rows):
+                self.table_lifetime.setItem(idx, 0, QTableWidgetItem(str(row['id'])))
+                self.table_lifetime.setItem(idx, 1, QTableWidgetItem(row['session_name']))
+                self.table_lifetime.setItem(idx, 2, QTableWidgetItem(str(row['job_index'])))
+                self.table_lifetime.setItem(idx, 3, QTableWidgetItem(row['video_title'] or ""))
+                self.table_lifetime.setItem(idx, 4, QTableWidgetItem(row['caption'] or ""))
+                self.table_lifetime.setItem(idx, 5, QTableWidgetItem(row['prompt']))
+                self.table_lifetime.setItem(idx, 6, QTableWidgetItem(row['status']))
+                self.table_lifetime.setItem(idx, 7, QTableWidgetItem(row['download_path'] or ""))
+        except Exception as e:
+            logger.error(f"Failed to refresh lifetime history: {e}")
+
+    def _export_lifetime_csv(self):
+        import csv
+        path, _ = QFileDialog.getSaveFileName(self, "Export History CSV", "", "CSV Files (*.csv)")
+        if not path:
+            return
+        try:
+            limit = int(self.combo_lifetime_limit.currentText())
+            date_f = self.combo_lifetime_date.currentText()
+            status_f = self.combo_lifetime_filter.currentText()
+            search_t = self.edit_lifetime_search.text().strip()
+            
+            rows = self.db.get_all_jobs_with_filters(
+                status_filter=status_f,
+                search_text=search_t,
+                date_filter=date_f,
+                limit_val=limit
+            )
+            with open(path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(["DB ID", "Session Name", "Job Index", "Product Title", "Suffix", "Prompt", "Status", "Finished At", "Download Path"])
+                for r in rows:
+                    writer.writerow([
+                        r['id'], r['session_name'], r['job_index'], r['video_title'],
+                        r['caption'], r['prompt'], r['status'], r['finished_at'], r['download_path']
+                    ])
+            QMessageBox.information(self, "Success", "Lifetime history exported successfully!")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to export CSV: {e}")
+
+    def _on_lifetime_table_context_menu(self, pos):
+        menu = QMenu(self)
+        relaunch_action = QAction("Relaunch Selected Historic Job", self)
+        batch_relaunch_action = QAction("Launch Historic Jobs as new Batch", self)
+        delete_action = QAction("Delete from DB", self)
+
+        relaunch_action.triggered.connect(self._relaunch_historic_job)
+        batch_relaunch_action.triggered.connect(self._launch_historic_jobs_as_new_batch)
+        delete_action.triggered.connect(self._delete_historic_jobs)
+
+        menu.addAction(relaunch_action)
+        menu.addAction(batch_relaunch_action)
+        menu.addSeparator()
+        menu.addAction(delete_action)
+        menu.exec(self.table_lifetime.viewport().mapToGlobal(pos))
+
+    def _relaunch_historic_job(self):
+        curr_row = self.table_lifetime.currentRow()
+        if curr_row < 0:
+            return
+        db_job_id = int(self.table_lifetime.item(curr_row, 0).text())
+        try:
+            jobs = self.db.get_jobs_by_ids([db_job_id])
+            if jobs:
+                job = jobs[0]
+                self._relaunch_job_manual(job.index)
+        except Exception as e:
+            logger.error(f"Failed to relaunch historic job: {e}")
+
+    def _launch_historic_jobs_as_new_batch(self):
+        selected_indexes = self.table_lifetime.selectedIndexes()
+        rows = sorted(list(set(idx.row() for idx in selected_indexes)))
+        if not rows:
+            return
+        
+        job_ids = []
+        for r in rows:
+            db_job_id = int(self.table_lifetime.item(r, 0).text())
+            job_ids.append(db_job_id)
+            
+        try:
+            historic_jobs = self.db.get_jobs_by_ids(job_ids)
+            self.jobs.clear()
+            for idx, j in enumerate(historic_jobs):
+                new_job = PromptJob(
+                    index=idx + 1,
+                    prompt=j.prompt,
+                    video_title=j.video_title,
+                    caption=j.caption or "mockup",
+                    status=JobStatus.PENDING
+                )
+                self.jobs.append(new_job)
+            self._refresh_table()
+            self._update_stats()
+            self.right_tabs.setCurrentIndex(0) # Switch to Current Jobs tab
+            self.txt_log.appendPlainText(f"[Info] Loaded {len(historic_jobs)} historic jobs as a new batch.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load batch: {e}")
+
+    def _delete_historic_jobs(self):
+        selected_indexes = self.table_lifetime.selectedIndexes()
+        rows = sorted(list(set(idx.row() for idx in selected_indexes)), reverse=True)
+        if not rows:
+            return
+            
+        confirm = QMessageBox.question(
+            self, "Confirm Delete",
+            f"Are you sure you want to delete {len(rows)} selected entries from the database?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if confirm == QMessageBox.StandardButton.Yes:
+            try:
+                conn = self.db._connect()
+                try:
+                    cur = conn.cursor()
+                    for r in rows:
+                        db_job_id = int(self.table_lifetime.item(r, 0).text())
+                        cur.execute("DELETE FROM jobs WHERE id = ?", (db_job_id,))
+                    conn.commit()
+                finally:
+                    conn.close()
+                self._refresh_lifetime_history()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to delete records: {e}")
+
+    def _toggle_lifetime_select_all(self):
+        self.table_lifetime.selectAll()
+
+    def _download_lifetime_selected_jobs(self):
+        QMessageBox.information(self, "Info", "Historic downloads are already located in their respective directories.")
+
+    def _retry_lifetime_all_failed_jobs(self):
+        selected_indexes = self.table_lifetime.selectedIndexes()
+        rows = sorted(list(set(idx.row() for idx in selected_indexes)))
+        if not rows:
+            return
+            
+        job_ids = []
+        for r in rows:
+            db_job_id = int(self.table_lifetime.item(r, 0).text())
+            job_ids.append(db_job_id)
+            
+        try:
+            historic_jobs = self.db.get_jobs_by_ids(job_ids)
+            failed_historic = [j for j in historic_jobs if j.status == JobStatus.FAILED]
+            if not failed_historic:
+                QMessageBox.information(self, "Info", "No failed jobs found in selection.")
+                return
+                
+            self.jobs.clear()
+            for idx, j in enumerate(failed_historic):
+                new_job = PromptJob(
+                    index=idx + 1,
+                    prompt=j.prompt,
+                    video_title=j.video_title,
+                    caption=j.caption or "mockup",
+                    status=JobStatus.PENDING
+                )
+                self.jobs.append(new_job)
+            self._refresh_table()
+            self._update_stats()
+            self.right_tabs.setCurrentIndex(0) # Switch to Current Jobs tab
+            self._start_batch()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to retry historic jobs: {e}")

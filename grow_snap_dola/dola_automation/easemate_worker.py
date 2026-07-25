@@ -381,7 +381,7 @@ class EasemateBatchRunner(QThread):
     job_finished = pyqtSignal(int, bool) # (index, success)
     batch_finished = pyqtSignal()
 
-    def __init__(self, jobs: list[PromptJob], settings: AutomationSettings, model: str, ratio: str, res: str, thread_count: int = 1):
+    def __init__(self, jobs: list[PromptJob], settings: AutomationSettings, model: str, ratio: str, res: str, thread_count: int = 1, db = None, session_id: int = None):
         super().__init__()
         self.jobs = jobs
         self.settings = settings
@@ -389,6 +389,8 @@ class EasemateBatchRunner(QThread):
         self.ratio = ratio
         self.res = res
         self.thread_count = thread_count
+        self.db = db
+        self.session_id = session_id
         self.active_workers = {}
         self.lock = threading.Lock()
         self._stop = False
@@ -401,6 +403,11 @@ class EasemateBatchRunner(QThread):
         
         def run_single_job(job_obj):
             job_obj.status = JobStatus.RUNNING
+            if self.db and job_obj.job_id:
+                try:
+                    self.db.update_job(job_obj.job_id, status=JobStatus.RUNNING, mark_started=True)
+                except Exception as de:
+                    logger.warning(f"Failed to update db status to RUNNING: {de}")
             self.job_finished.emit(job_obj.index, False)
             
             success = False
@@ -433,9 +440,33 @@ class EasemateBatchRunner(QThread):
                     
             if success:
                 job_obj.status = JobStatus.COMPLETED
+                if self.db and job_obj.job_id:
+                    try:
+                        self.db.update_job(
+                            job_obj.job_id,
+                            status=JobStatus.COMPLETED,
+                            download_path=Path(job_obj.download_path) if job_obj.download_path else None,
+                            mark_finished=True
+                        )
+                        if job_obj.download_path:
+                            self.db.record_download(job_obj.job_id, Path(job_obj.download_path))
+                        self.db.bump_session_counts(self.session_id, completed=1)
+                    except Exception as de:
+                        logger.warning(f"Failed to update db status to COMPLETED: {de}")
                 self.job_finished.emit(job_obj.index, True)
             else:
                 job_obj.status = JobStatus.FAILED
+                if self.db and job_obj.job_id:
+                    try:
+                        self.db.update_job(
+                            job_obj.job_id,
+                            status=JobStatus.FAILED,
+                            error=job_obj.error or "Generation failed",
+                            mark_finished=True
+                        )
+                        self.db.bump_session_counts(self.session_id, failed=1)
+                    except Exception as de:
+                        logger.warning(f"Failed to update db status to FAILED: {de}")
                 self.job_finished.emit(job_obj.index, False)
 
         while (queue or running_threads) and not self._stop:
