@@ -783,13 +783,12 @@ class EasemateAIAutomationWidget(QWidget):
                     from playwright.sync_api import sync_playwright
 
                 with sync_playwright() as p:
-                    launch_args = ["--disable-blink-features=AutomationControlled", "--disable-quic", "--ignore-certificate-errors", "--max-connections-per-host=4", "--max-total-connections=10"]
+                    launch_args = ["--disable-blink-features=AutomationControlled"]
                     try:
                         context = p.chromium.launch_persistent_context(
                             user_data_dir=str(profile_dir),
                             headless=False,
                             args=launch_args,
-                            ignore_https_errors=True,
                             viewport={"width": 1280, "height": 800}
                         )
                     except Exception as e:
