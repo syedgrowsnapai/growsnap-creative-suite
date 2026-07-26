@@ -61,21 +61,11 @@ class EasemateBrowserWorker:
         mode_label = "headed" if not self.settings.headless else "headless"
         self.log_info(f"Job #{job.index}: Starting Playwright execution in {mode_label} mode.")
         
-        # Determine profile directory path specific to this job index
+        # Determine profile directory path
         profile_name = getattr(self.settings, 'active_profile_name', 'Default')
-        profile_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / f"{profile_name}_job_{job.index}"
-        
-        # Clear profile dir on new submission to guarantee clean cookies and bypass free-tier login limits
-        if mode != "download_only" and profile_dir.exists():
-            import shutil
-            try:
-                shutil.rmtree(profile_dir)
-                self.log_info(f"Cleared existing isolated profile directory to ensure clean start: {profile_dir}")
-            except Exception as e:
-                self.log_info(f"Warning: failed to clear profile dir: {e}")
-                
+        profile_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / profile_name
         profile_dir.mkdir(parents=True, exist_ok=True)
-        self.log_info(f"Using isolated browser profile for job #{job.index}: {profile_dir}")
+        self.log_info(f"Using persistent browser profile: {profile_name} at {profile_dir}")
         
         session_path = self._get_job_session_path(job.index)
         success = False
@@ -84,16 +74,15 @@ class EasemateBrowserWorker:
             launch_args = []
             if os.name != 'nt':
                 launch_args.extend(["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
-            # Always append anti-automation controlled option
-            launch_args.append("--disable-blink-features=AutomationControlled")
+            if not self.settings.headless:
+                launch_args.append("--disable-blink-features=AutomationControlled")
             
             try:
                 context = p.chromium.launch_persistent_context(
                     user_data_dir=str(profile_dir),
                     headless=self.settings.headless,
                     viewport={"width": 1280, "height": 800},
-                    args=launch_args,
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    args=launch_args
                 )
                 self._context = context
             except Exception as e:
@@ -143,7 +132,15 @@ class EasemateBrowserWorker:
         
         self.log_info("Navigating to easemate.ai...")
         page.goto("https://www.easemate.ai/ai-image-generator", wait_until="domcontentloaded", timeout=loading_timeout_ms)
-        self.log_info("Navigation completed.")
+        self.log_info("Navigation completed. Cleansing anonymous session storage...")
+        
+        try:
+            context.clear_cookies()
+            page.evaluate("window.localStorage.clear(); window.sessionStorage.clear();")
+            self.log_info("Cleared cookies and local storage. Refreshing to apply...")
+            page.goto("https://www.easemate.ai/ai-image-generator", wait_until="domcontentloaded", timeout=loading_timeout_ms)
+        except Exception as e:
+            self.log_info(f"Warning: Failed to clear browser storage: {e}")
         
         # Force browser to focus on page DOM and dismiss suggestions / info bubbles
         try:
@@ -367,28 +364,11 @@ class EasemateBrowserWorker:
         except Exception:
             pass
         gen_btn.click()
+        self.log_info("Generate button clicked. Submission sent.")
 
-        # Wait for potential CAPTCHA verification / Submission progress (up to 45 seconds)
-        self.log_info("Waiting for captcha verification checks / submission buffers...")
-        
-        # Wait for redirect to specific chat/job page
-        self.log_info("Waiting for redirect to capture job URL...")
-        base_url = "https://www.easemate.ai/ai-image-generator"
-        redirected = False
-        for _ in range(30): # up to 15 seconds
-            if page.url.strip("/") != base_url.strip("/"):
-                self.log_info(f"Detected redirect! New URL: {page.url}")
-                redirected = True
-                break
-            page.wait_for_timeout(500)
-            
-        if not redirected:
-            # If not redirected yet, wait up to 10 seconds more
-            page.wait_for_timeout(10000)
-            
-        if not self.settings.submit_and_close:
-            # Only wait the full generation buffer if we are NOT closing the browser immediately
-            page.wait_for_timeout(20000)
+        # Wait 30 seconds unconditionally after submitting the request
+        self.log_info("Waiting 30 seconds for submission buffers...")
+        page.wait_for_timeout(30000)
 
         # Save mid-flight session storage just in case we need it for download mode
         try:
@@ -412,6 +392,20 @@ class EasemateBrowserWorker:
         if not job.chat_url:
             raise Exception("Job does not have a saved chat URL to download from.")
         self.log_info(f"Navigating directly to job URL: {job.chat_url}")
+        
+        # Load and restore session state cookies
+        try:
+            import json
+            session_path = self._get_job_session_path(job.index)
+            if session_path.exists():
+                with open(session_path, 'r', encoding='utf-8') as f:
+                    state = json.load(f)
+                context.clear_cookies()
+                context.add_cookies(state.get("cookies", []))
+                self.log_info(f"Restored cookies for job #{job.index} session successfully.")
+        except Exception as e:
+            self.log_info(f"Warning: Failed to restore session cookies: {e}")
+            
         page.goto(job.chat_url, wait_until="domcontentloaded")
         page.wait_for_timeout(5000)
         return self._wait_and_download(page, job)
