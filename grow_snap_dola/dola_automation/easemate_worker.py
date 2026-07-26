@@ -29,11 +29,19 @@ class VPNRotator:
     _last_rotate_time = 0.0
     _current_country_idx = 0
     
-    # Supported countries by both Dola and NordVPN
+    # Supported countries for EaseMate rotation (all major NordVPN locations)
     countries = [
-        "Singapore", "Japan", "United Kingdom", "Germany", "France", 
-        "Italy", "Australia", "Spain", "Netherlands", 
-        "Sweden", "Switzerland", "New Zealand"
+        "United States", "Canada", "United Kingdom", "Germany", "France",
+        "Japan", "Singapore", "Australia", "Netherlands", "Sweden",
+        "Switzerland", "Spain", "Italy", "Norway", "Denmark",
+        "Finland", "Ireland", "Belgium", "Austria", "New Zealand",
+        "Poland", "Czech Republic", "Hungary", "Romania", "Bulgaria",
+        "Greece", "Portugal", "Estonia", "Latvia", "Lithuania",
+        "Slovakia", "Slovenia", "Croatia", "Iceland", "Albania",
+        "South Korea", "Taiwan", "Hong Kong", "India", "Malaysia",
+        "Thailand", "Vietnam", "Indonesia", "South Africa", "Brazil",
+        "Mexico", "Chile", "Colombia", "Argentina", "Costa Rica",
+        "Turkey", "Israel", "United Arab Emirates", "Georgia"
     ]
     
     @classmethod
