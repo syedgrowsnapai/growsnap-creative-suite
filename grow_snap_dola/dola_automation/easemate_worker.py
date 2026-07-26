@@ -74,32 +74,16 @@ class EasemateBrowserWorker:
             launch_args = []
             if os.name != 'nt':
                 launch_args.extend(["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
-            
             if not self.settings.headless:
-                launch_args.extend([
-                    "--disable-blink-features=AutomationControlled",
-                    "--start-maximized",
-                    "--disable-save-password-bubble",
-                    "--disable-translate",
-                    "--disable-infobars",
-                    "--disable-notifications",
-                    "--disable-extensions",
-                    "--no-default-browser-check",
-                    "--no-first-run"
-                ])
+                launch_args.append("--disable-blink-features=AutomationControlled")
             
             try:
-                context_kwargs = {
-                    "user_data_dir": str(profile_dir),
-                    "headless": self.settings.headless,
-                    "args": launch_args
-                }
-                if self.settings.headless:
-                    context_kwargs["viewport"] = {"width": 1280, "height": 800}
-                else:
-                    context_kwargs["no_viewport"] = True
-                
-                context = p.chromium.launch_persistent_context(**context_kwargs)
+                context = p.chromium.launch_persistent_context(
+                    user_data_dir=str(profile_dir),
+                    headless=self.settings.headless,
+                    viewport={"width": 1280, "height": 800},
+                    args=launch_args
+                )
                 self._context = context
             except Exception as e:
                 self.log_info(f"Failed to launch persistent context: {e}")
