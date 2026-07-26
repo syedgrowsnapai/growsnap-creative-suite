@@ -568,104 +568,122 @@ class EasemateBrowserWorker:
         return self._wait_and_download(page, job)
 
     def _wait_and_download(self, page: Page, job: PromptJob) -> bool:
-        self.log_info("Polling for generated image matching prompt...")
+        self.log_info("Waiting patiently for the image generation to complete...")
         
-        # Clean prompt for matching
-        clean_prompt = job.prompt.strip()
-        # Keep it short to ensure it fits in case the UI truncates it
-        short_prompt = clean_prompt[:25]
+        # 1. Wait for "Generating..." progress text to completely disappear from the page
+        generating_detected = False
+        max_gen_polls = 60  # 60 * 5 seconds = 5 minutes maximum wait
         
-        download_btn = None
-        max_polls = 18  # 18 * 10 seconds = 3 minutes maximum wait
-        poll_interval = 10000  # 10 seconds
-        
-        for attempt in range(max_polls):
+        for gp in range(max_gen_polls):
             if self._cancelled:
                 self.log_info("Job execution cancelled by user.")
                 return False
                 
-            # Check for active generation progress messages to display in GUI status
             try:
+                # Find any text element containing "generating" (case-insensitive)
                 progress_loc = page.locator("div:has-text('Generating'), span:has-text('Generating'), p:has-text('Generating'), *:has-text('Generating')").first
                 if progress_loc.is_visible():
                     progress_text = (progress_loc.text_content() or "").strip()
                     if progress_text and "generating" in progress_text.lower():
-                        # Standardize text length
+                        generating_detected = True
                         if len(progress_text) > 40:
                             progress_text = progress_text[:37] + "..."
                         self.log_info(f"EaseMate Status: {progress_text}")
                         # Emit to UI table row status
                         self.job_progress.emit(job.index, progress_text)
+                        
+                        # Wait 5 seconds and poll again
+                        page.wait_for_timeout(5000)
+                        continue
             except Exception:
                 pass
                 
-            # Attempt to find the card container by looking for the prompt text directly in the card content
+            # If we haven't seen a generating message yet, wait a brief moment to let it start up
+            if not generating_detected and gp < 3:
+                page.wait_for_timeout(3000)
+                continue
+                
+            self.log_info("EaseMate 'Generating...' progress text has disappeared. Generation completed.")
+            break
+            
+        # Wait 3 seconds for the React DOM to fully render the completed card buttons
+        page.wait_for_timeout(3000)
+        
+        # 2. Locate the download button inside the card matching this prompt
+        clean_prompt = job.prompt.strip()
+        short_prompt = clean_prompt[:25]
+        download_btn = None
+        
+        # Try to locate the download button inside the matching card
+        try:
+            candidates = page.locator(f"p:has-text('{short_prompt}'), div:has-text('{short_prompt}'), span:has-text('{short_prompt}')").all()
+            for cand in candidates:
+                if cand.is_visible():
+                    parent = cand
+                    for _ in range(5):
+                        parent = parent.locator("..")
+                        clickables = parent.locator("button, a, div.cursor-pointer, [role='button']").all()
+                        icon_only = []
+                        for c in clickables:
+                            txt = (c.inner_text() or "").strip().lower()
+                            if any(kw in txt for kw in ["generate", "video", "recreate", "remix"]):
+                                continue
+                            icon_only.append(c)
+                        if icon_only:
+                            download_btn = icon_only[0]
+                            break
+                    if download_btn:
+                        break
+        except Exception as e:
+            self.log_info(f"Error searching card via prompt text: {e}")
+            
+        # Fallback: search by image alt matching the prompt
+        if not download_btn:
             try:
-                candidates = page.locator(f"p:has-text('{short_prompt}'), div:has-text('{short_prompt}'), span:has-text('{short_prompt}')").all()
-                for cand in candidates:
-                    if cand.is_visible():
-                        # Walk up to parent card container
-                        parent = cand
-                        for _ in range(5):
+                imgs = page.locator("img").all()
+                for img in imgs:
+                    alt = (img.get_attribute("alt") or "").strip().lower()
+                    if alt and (short_prompt.lower() in alt or alt in clean_prompt.lower()):
+                        parent = img
+                        for _ in range(6):
                             parent = parent.locator("..")
-                            # Find all clickable buttons inside this card
                             clickables = parent.locator("button, a, div.cursor-pointer, [role='button']").all()
-                            
-                            # Filter for icon-only buttons by excluding text-heavy buttons
                             icon_only = []
                             for c in clickables:
                                 txt = (c.inner_text() or "").strip().lower()
                                 if any(kw in txt for kw in ["generate", "video", "recreate", "remix"]):
                                     continue
                                 icon_only.append(c)
-                                
                             if icon_only:
-                                # The first icon-only button is the download button
                                 download_btn = icon_only[0]
                                 break
                         if download_btn:
                             break
-            except Exception as e:
-                self.log_info(f"Error searching card via prompt text: {e}")
+            except Exception:
+                pass
                 
-            # Fallback: search by img alt attribute
-            if not download_btn:
-                try:
-                    imgs = page.locator("img").all()
-                    for img in imgs:
-                        alt = (img.get_attribute("alt") or "").strip().lower()
-                        if alt and (short_prompt.lower() in alt or alt in clean_prompt.lower()):
-                            parent = img
-                            for _ in range(6):
-                                parent = parent.locator("..")
-                                clickables = parent.locator("button, a, div.cursor-pointer, [role='button']").all()
-                                icon_only = []
-                                for c in clickables:
-                                    txt = (c.inner_text() or "").strip().lower()
-                                    if any(kw in txt for kw in ["generate", "video", "recreate", "remix"]):
-                                        continue
-                                    icon_only.append(c)
-                                if icon_only:
-                                    download_btn = icon_only[0]
-                                    break
-                            if download_btn:
-                                break
-                except Exception:
-                    pass
-                    
-            pass
-                    
-            # If we found the download button and it's visible, break out
-            if download_btn and download_btn.is_visible():
-                self.log_info("Successfully located download button for the generated image.")
-                break
-                
-            # If still generating, print update and sleep
-            self.log_info(f"Waiting for generation to finish... (Poll {attempt + 1}/{max_polls})")
-            page.wait_for_timeout(poll_interval)
-            
+        # Final fallback: pick the very first icon-only button under the first generated feed card
         if not download_btn:
-            raise Exception("Generation timed out. Download button did not appear within 3 minutes.")
+            try:
+                self.log_info("Download button not found in card; trying first feed card fallback...")
+                feed_cards = page.locator("div.border, div.rounded-3xl, div.shadow-sm").all()
+                for card in feed_cards:
+                    if card.is_visible():
+                        clickables = card.locator("button, a, div.cursor-pointer").all()
+                        icon_only = []
+                        for c in clickables:
+                            txt = (c.inner_text() or "").strip().lower()
+                            if any(kw in txt for kw in ["generate", "video", "recreate", "remix"]):
+                                continue
+                            icon_only.append(c)
+                        if icon_only:
+                            download_btn = icon_only[0]
+                            break
+            except Exception:
+                pass
+                
+        if not download_btn:
+            raise Exception("Failed to locate the download button for the generated image.")
             
         self.log_info("Initiating high-resolution image download...")
         safe_name = "".join(c for c in job.video_title if c.isalnum() or c in (' ', '-', '_')).strip()
