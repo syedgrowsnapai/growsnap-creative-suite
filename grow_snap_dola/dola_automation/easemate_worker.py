@@ -139,6 +139,14 @@ class EasemateBrowserWorker:
         session_path = self._get_job_session_path(job.index)
         success = False
         
+        # Connect to a fresh NordVPN location BEFORE launching the browser context to ensure guest limits are bypassed immediately
+        if mode != "download_only":
+            self.log_info("Pre-launch task started: Connecting to a fresh NordVPN IP region...")
+            try:
+                VPNRotator.rotate_vpn(self.log_info)
+            except Exception as e:
+                self.log_info(f"Warning: Failed to rotate NordVPN connection on startup: {e}")
+                
         with sync_playwright() as p:
             launch_args = []
             if os.name != 'nt':
@@ -283,7 +291,10 @@ class EasemateBrowserWorker:
                     img_to_img_tab.scroll_into_view_if_needed()
                 except Exception:
                     pass
-                img_to_img_tab.click()
+                try:
+                    img_to_img_tab.click(force=True, timeout=5000)
+                except Exception:
+                    page.evaluate("document.querySelectorAll('button, span, div').forEach(el => { if (el.innerText && el.innerText.trim() === 'Image to Image') el.click(); })")
                 self.log_info("Successfully switched to Image to Image mode.")
                 page.wait_for_timeout(1500)
                 
@@ -304,7 +315,10 @@ class EasemateBrowserWorker:
                     text_to_image_tab.scroll_into_view_if_needed()
                 except Exception:
                     pass
-                text_to_image_tab.click()
+                try:
+                    text_to_image_tab.click(force=True, timeout=5000)
+                except Exception:
+                    page.evaluate("document.querySelectorAll('button, span, div').forEach(el => { if (el.innerText && el.innerText.trim() === 'Text to Image') el.click(); })")
                 self.log_info("Successfully switched to Text to Image mode.")
                 page.wait_for_timeout(1000)
             except Exception as e:
