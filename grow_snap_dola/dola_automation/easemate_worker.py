@@ -61,34 +61,21 @@ class EasemateBrowserWorker:
         mode_label = "headed" if not self.settings.headless else "headless"
         self.log_info(f"Job #{job.index}: Starting Playwright execution in {mode_label} mode.")
         
-        # Determine profile directory path
+        # Determine profile directory path specific to this job index
         profile_name = getattr(self.settings, 'active_profile_name', 'Default')
-        profile_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / profile_name
+        profile_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / f"{profile_name}_job_{job.index}"
         
-        # If submitting, clear existing cookies/local storage files on disk to bypass free-tier limits
+        # Clear profile dir on new submission to guarantee clean cookies and bypass free-tier login limits
         if mode != "download_only" and profile_dir.exists():
             import shutil
-            paths_to_delete = [
-                profile_dir / "Default" / "Network" / "Cookies",
-                profile_dir / "Default" / "Cookies",
-                profile_dir / "Default" / "Local Storage",
-                profile_dir / "Default" / "Session Storage",
-                profile_dir / "Default" / "IndexedDB",
-                profile_dir / "Default" / "Service Worker",
-                profile_dir / "Default" / "Cache",
-                profile_dir / "Default" / "Code Cache"
-            ]
-            for p_to_del in paths_to_delete:
-                try:
-                    if p_to_del.is_dir():
-                        shutil.rmtree(p_to_del)
-                    elif p_to_del.is_file():
-                        p_to_del.unlink()
-                except Exception:
-                    pass
-                    
+            try:
+                shutil.rmtree(profile_dir)
+                self.log_info(f"Cleared existing isolated profile directory to ensure clean start: {profile_dir}")
+            except Exception as e:
+                self.log_info(f"Warning: failed to clear profile dir: {e}")
+                
         profile_dir.mkdir(parents=True, exist_ok=True)
-        self.log_info(f"Using persistent browser profile: {profile_name} at {profile_dir}")
+        self.log_info(f"Using isolated browser profile for job #{job.index}: {profile_dir}")
         
         session_path = self._get_job_session_path(job.index)
         success = False
@@ -120,29 +107,7 @@ class EasemateBrowserWorker:
             page.set_default_navigation_timeout(60000)
             
             # Anti-detection Playwright stealth injection
-            try:
-                page.add_init_script("""
-                    // Hide webdriver property
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined
-                    });
-                    // Spoof chrome properties
-                    window.chrome = {
-                        runtime: {}
-                    };
-                    // Spoof browser plugins
-                    Object.defineProperty(navigator, 'plugins', {
-                        get: () => [1, 2, 3, 4, 5]
-                    });
-                    // Spoof preferred languages
-                    Object.defineProperty(navigator, 'languages', {
-                        get: () => ['en-US', 'en']
-                    });
-                """)
-                self.log_info("Successfully injected anti-detection script (stealth) into page.")
-            except Exception as e:
-                self.log_info(f"Warning: Failed to inject anti-detection script: {e}")
-            
+
             try:
                 if mode == "download_only":
                     self.log_info(f"Opening browser to download for job #{job.index}...")

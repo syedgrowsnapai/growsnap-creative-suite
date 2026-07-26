@@ -871,6 +871,17 @@ class EasemateAIAutomationWidget(QWidget):
             duplicate_row_action.triggered.connect(self._context_duplicate_rows)
             actions.append(duplicate_row_action)
             
+            # Change Status Submenu
+            status_menu = menu.addMenu("Change Status")
+            set_pending = status_menu.addAction("Pending")
+            set_pending.triggered.connect(lambda: self._set_selected_rows_status(JobStatus.PENDING))
+            set_running = status_menu.addAction("Running")
+            set_running.triggered.connect(lambda: self._set_selected_rows_status(JobStatus.RUNNING))
+            set_completed = status_menu.addAction("Completed")
+            set_completed.triggered.connect(lambda: self._set_selected_rows_status(JobStatus.COMPLETED))
+            set_failed = status_menu.addAction("Failed")
+            set_failed.triggered.connect(lambda: self._set_selected_rows_status(JobStatus.FAILED))
+            
         menu.addSeparator()
 
         relaunch_action = menu.addAction("Relaunch Selected Rows (Manual Browser)")
@@ -886,6 +897,31 @@ class EasemateAIAutomationWidget(QWidget):
         actions.append(remove_action)
         
         menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _set_selected_rows_status(self, status: JobStatus):
+        selected_rows = set(idx.row() for idx in self.table.selectedIndexes())
+        if not selected_rows:
+            return
+        
+        self.table.blockSignals(True)
+        for row in selected_rows:
+            if row < len(self.jobs):
+                job = self.jobs[row]
+                job.status = status
+                # Clear error details if status is reset to Pending or Completed
+                if status in (JobStatus.PENDING, JobStatus.COMPLETED):
+                    job.error = None
+                
+                # Sync status changes to SQLite DB history
+                if job.job_id:
+                    try:
+                        self.db.update_job(job.job_id, status=status, error=job.error)
+                    except Exception as e:
+                        logger.error(f"Failed to update job status in DB: {e}")
+                        
+        self.table.blockSignals(False)
+        self._refresh_table()
+        self._update_stats()
 
     def _context_add_row(self):
         dialog = JobDialog(self)
