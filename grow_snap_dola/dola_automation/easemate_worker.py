@@ -176,59 +176,63 @@ class EasemateBrowserWorker:
         # 1. Model Selection
         model = self.settings.model
         self.log_info(f"Selecting model: {model}")
-        trigger = None
-        trigger_selectors = [
-            "span:has-text('Models') + div div.cursor-pointer",
-            "span:has-text('Models') + div",
-            "div:has-text('Models') + div div.cursor-pointer",
-            "button:has-text('GPT image 2')",
-            "div.cursor-pointer:has-text('GPT image 2')",
-            "div.cursor-pointer:has-text('EaseMate Standard')"
-        ]
-        for sel in trigger_selectors:
-            loc = page.locator(sel).first
-            if loc.is_visible():
-                trigger = loc
-                break
         
-        if trigger:
-            curr_model_text = trigger.inner_text().strip()
-            if curr_model_text == model:
-                self.log_info(f"Model is already set to '{model}'. Skipping selection.")
-            else:
-                self.log_info("Clicking model dropdown trigger...")
-                try:
-                    trigger.scroll_into_view_if_needed()
-                except Exception:
-                    pass
-                trigger.click()
-                page.wait_for_timeout(1500)
-                
-                model_option = None
-                option_selectors = [
-                    f"text='{model}'",
-                    f"div:has-text('{model}')",
-                    f"span:has-text('{model}')",
-                    f"button:has-text('{model}')"
-                ]
-                for o_sel in option_selectors:
-                    opt = page.locator(o_sel).first
-                    if opt.is_visible():
-                        model_option = opt
-                        break
-                        
-                if model_option:
-                    self.log_info(f"Selecting option: {model}")
+        if model == "GPT image 2":
+            self.log_info("Model is 'GPT image 2' (default). Bypassing selection to avoid popup overlaps.")
+        else:
+            trigger = None
+            trigger_selectors = [
+                "span:has-text('Models') + div div.cursor-pointer",
+                "span:has-text('Models') + div",
+                "div:has-text('Models') + div div.cursor-pointer",
+                "button:has-text('GPT image 2')",
+                "div.cursor-pointer:has-text('GPT image 2')",
+                "div.cursor-pointer:has-text('EaseMate Standard')"
+            ]
+            for sel in trigger_selectors:
+                loc = page.locator(sel).first
+                if loc.is_visible():
+                    trigger = loc
+                    break
+            
+            if trigger:
+                curr_model_text = trigger.inner_text().strip()
+                if model.lower() in curr_model_text.lower():
+                    self.log_info(f"Model is already set to '{model}'. Skipping selection.")
+                else:
+                    self.log_info("Clicking model dropdown trigger...")
                     try:
-                        model_option.scroll_into_view_if_needed()
+                        trigger.scroll_into_view_if_needed()
                     except Exception:
                         pass
-                    model_option.click()
+                    trigger.click()
                     page.wait_for_timeout(1500)
-                else:
-                    self.log_info(f"Model option '{model}' not found in dropdown list.")
-        else:
-            self.log_info("Model dropdown trigger not found or not visible.")
+                    
+                    model_option = None
+                    option_selectors = [
+                        f"text='{model}'",
+                        f"div:has-text('{model}')",
+                        f"span:has-text('{model}')",
+                        f"button:has-text('{model}')"
+                    ]
+                    for o_sel in option_selectors:
+                        opt = page.locator(o_sel).first
+                        if opt.is_visible():
+                            model_option = opt
+                            break
+                            
+                    if model_option:
+                        self.log_info(f"Selecting option: {model}")
+                        try:
+                            model_option.scroll_into_view_if_needed()
+                        except Exception:
+                            pass
+                        model_option.click()
+                        page.wait_for_timeout(1500)
+                    else:
+                        self.log_info(f"Model option '{model}' not found in dropdown list.")
+            else:
+                self.log_info("Model dropdown trigger not found or not visible.")
 
         # 2. Enter Prompt
         self.log_info(f"Pasting prompt: {job.prompt[:60]}...")
@@ -296,43 +300,7 @@ class EasemateBrowserWorker:
             self.log_info(f"Aspect ratio '{aspect_ratio}' not visible, skipping.")
 
         # 4. Resolution Selection
-        resolution_ratio = getattr(self.settings, 'resolution', 'High-Definition')
-        self.log_info(f"Selecting resolution ratio: {resolution_ratio}")
-        res_trigger = None
-        res_trigger_selectors = [
-            "div:has-text('Resolution Ratio') + div",
-            "span:has-text('Resolution Ratio') + div",
-            "div:has-text('Resolution Ratio') + div div.cursor-pointer"
-        ]
-        for rt_sel in res_trigger_selectors:
-            loc = page.locator(rt_sel).first
-            if loc.is_visible():
-                res_trigger = loc
-                break
-        if res_trigger:
-            curr_res_text = res_trigger.inner_text().strip()
-            if curr_res_text == resolution_ratio:
-                self.log_info(f"Resolution ratio is already set to '{resolution_ratio}'. Skipping selection.")
-            else:
-                self.log_info("Clicking resolution dropdown trigger...")
-                try:
-                    res_trigger.scroll_into_view_if_needed()
-                except Exception:
-                    pass
-                res_trigger.click()
-                page.wait_for_timeout(500)
-                res_option = page.locator(f"text='{resolution_ratio}'").first
-                if res_option.is_visible():
-                    try:
-                        res_option.scroll_into_view_if_needed()
-                    except Exception:
-                        pass
-                    res_option.click()
-                    page.wait_for_timeout(500)
-                else:
-                    self.log_info(f"Resolution ratio option '{resolution_ratio}' not visible.")
-        else:
-            self.log_info("Resolution ratio trigger not visible.")
+        self.log_info("Resolution ratio is locked to '1K' (free tier). Skipping selection.")
 
         # 5. Submit / Generate
         self.log_info("Clicking Generate button...")

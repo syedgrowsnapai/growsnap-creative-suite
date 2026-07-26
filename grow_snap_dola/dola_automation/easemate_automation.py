@@ -858,8 +858,16 @@ class EasemateAIAutomationWidget(QWidget):
             edit_row_action = menu.addAction("Edit Selected Row...")
             edit_row_action.triggered.connect(self._context_edit_row)
             actions.append(edit_row_action)
+
+            copy_prompt_action = menu.addAction("Copy Prompt Text")
+            copy_prompt_action.triggered.connect(self._context_copy_prompt)
+            actions.append(copy_prompt_action)
             
-            duplicate_row_action = menu.addAction("Copy/Duplicate Selected Rows")
+            copy_err_action = menu.addAction("Copy Error Details")
+            copy_err_action.triggered.connect(self._context_copy_error)
+            actions.append(copy_err_action)
+            
+            duplicate_row_action = menu.addAction("Duplicate Selected Rows")
             duplicate_row_action.triggered.connect(self._context_duplicate_rows)
             actions.append(duplicate_row_action)
             
@@ -924,6 +932,24 @@ class EasemateAIAutomationWidget(QWidget):
             self.jobs.append(dup)
         self._refresh_table()
         self._update_stats()
+
+    def _context_copy_prompt(self):
+        selected = list(set(idx.row() for idx in self.table.selectedIndexes()))
+        if not selected:
+            return
+        row = selected[0]
+        item = self.table.item(row, 3)
+        if item:
+            QApplication.clipboard().setText(item.text())
+
+    def _context_copy_error(self):
+        selected = list(set(idx.row() for idx in self.table.selectedIndexes()))
+        if not selected:
+            return
+        row = selected[0]
+        item = self.table.item(row, 6)
+        if item:
+            QApplication.clipboard().setText(item.text())
 
     def _context_relaunch_manual(self):
         selected = set(idx.row() for idx in self.table.selectedIndexes())
