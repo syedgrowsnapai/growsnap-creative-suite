@@ -61,22 +61,12 @@ class EasemateBrowserWorker:
         mode_label = "headed" if not self.settings.headless else "headless"
         self.log_info(f"Job #{job.index}: Starting Playwright execution in {mode_label} mode.")
         
-        # Determine profile directory path specific to this job index
+        # Determine profile directory path
         profile_name = getattr(self.settings, 'active_profile_name', 'Default')
-        profile_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / f"{profile_name}_job_{job.index}"
-        
-        # Clear profile dir on new submission to guarantee clean cookies and bypass free-tier login limits
-        if mode != "download_only" and profile_dir.exists():
-            import shutil
-            try:
-                shutil.rmtree(profile_dir)
-                self.log_info(f"Cleared existing isolated profile directory to ensure clean start: {profile_dir}")
-            except Exception as e:
-                self.log_info(f"Warning: failed to clear profile dir: {e}")
-                
+        profile_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / profile_name
         profile_dir.mkdir(parents=True, exist_ok=True)
-        self.log_info(f"Using isolated browser profile for job #{job.index}: {profile_dir}")
-        
+        self.log_info(f"Using persistent browser profile: {profile_name} at {profile_dir}")
+                
         session_path = self._get_job_session_path(job.index)
         success = False
         
@@ -142,9 +132,32 @@ class EasemateBrowserWorker:
         loading_timeout_ms = loading_timeout_sec * 1000
         page.set_default_timeout(loading_timeout_ms)
         
-        self.log_info("Navigating to easemate.ai...")
+        # First load the homepage to clear cookies and storage natively
+        self.log_info("Navigating to easemate.ai to cleanse session storage...")
+        try:
+            page.goto("https://www.easemate.ai/", wait_until="domcontentloaded", timeout=30000)
+            context.clear_cookies()
+            page.evaluate("""
+                try { window.localStorage.clear(); } catch(e) {}
+                try { window.sessionStorage.clear(); } catch(e) {}
+                try {
+                    if (window.indexedDB && window.indexedDB.databases) {
+                        window.indexedDB.databases().then(dbs => {
+                            dbs.forEach(db => {
+                                try { window.indexedDB.deleteDatabase(db.name); } catch(err) {}
+                            });
+                        });
+                    }
+                } catch(e) {}
+            """)
+            page.wait_for_timeout(1000)
+            self.log_info("Cleared cookies, localStorage, and IndexedDB successfully.")
+        except Exception as e:
+            self.log_info(f"Warning clearing session storage: {e}")
+            
+        self.log_info("Navigating to EaseMate Generator...")
         page.goto("https://www.easemate.ai/ai-image-generator", wait_until="domcontentloaded", timeout=loading_timeout_ms)
-        self.log_info("Navigation completed.")
+        self.log_info("Generator page loaded.")
         
         # Force browser to focus on page DOM and dismiss suggestions / info bubbles
         try:
@@ -176,7 +189,8 @@ class EasemateBrowserWorker:
         # Switch to Text to Image mode
         self.log_info("Switching to Text to Image mode...")
         text_to_image_tab = page.locator("text=Text to Image").first
-        if text_to_image_tab.is_visible():
+        try:
+            text_to_image_tab.wait_for(state="visible", timeout=20000)
             try:
                 text_to_image_tab.scroll_into_view_if_needed()
             except Exception:
@@ -184,8 +198,8 @@ class EasemateBrowserWorker:
             text_to_image_tab.click()
             self.log_info("Successfully switched to Text to Image mode.")
             page.wait_for_timeout(1000)
-        else:
-            self.log_info("Text to Image tab not visible, skipping switch.")
+        except Exception as e:
+            self.log_info(f"Warning: Text to Image tab not visible or failed to load: {e}")
 
         # 1. Model Selection
         model = self.settings.model
