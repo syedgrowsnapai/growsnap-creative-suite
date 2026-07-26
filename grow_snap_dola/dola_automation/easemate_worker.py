@@ -260,8 +260,21 @@ class EasemateBrowserWorker:
             
         page.wait_for_timeout(3000)
 
+        # Determine mode to run based on settings and reference image existence
+        run_mode = "text"
+        gen_mode_setting = getattr(self.settings, 'generation_mode', "Auto")
+        
+        if "Text to Image" in gen_mode_setting:
+            run_mode = "text"
+        elif "Image to Image" in gen_mode_setting:
+            run_mode = "image"
+            if not job.has_reference:
+                raise Exception("Image to Image mode selected, but no valid local reference image path is provided in the CSV.")
+        else: # Auto
+            run_mode = "image" if job.has_reference else "text"
+
         # Switch to correct mode (Image to Image or Text to Image)
-        if job.has_reference:
+        if run_mode == "image":
             self.log_info("Switching to Image to Image mode...")
             img_to_img_tab = page.locator("button:has-text('Image to Image'), span:has-text('Image to Image'), div:has-text('Image to Image')").first
             try:

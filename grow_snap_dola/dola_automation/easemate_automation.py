@@ -404,19 +404,29 @@ class EasemateAIAutomationWidget(QWidget):
         self.combo_model.setEnabled(False) # Locked by default for free generations
         gen_lay.addWidget(self.combo_model, 0, 1)
 
-        gen_lay.addWidget(QLabel("Aspect Ratio:", self), 1, 0)
+        gen_lay.addWidget(QLabel("Generation Mode:", self), 1, 0)
+        self.combo_gen_mode = QComboBox(self)
+        self.combo_gen_mode.addItems([
+            "Auto (Use reference if path exists)",
+            "Text to Image (Ignore reference paths)",
+            "Image to Image (Requires reference path)"
+        ])
+        self.combo_gen_mode.setCurrentIndex(0)
+        gen_lay.addWidget(self.combo_gen_mode, 1, 1)
+
+        gen_lay.addWidget(QLabel("Aspect Ratio:", self), 2, 0)
         self.combo_ratio = QComboBox(self)
         self.combo_ratio.addItems([
             "1:1", "Auto", "9:16", "16:9", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2", "3:1", "1:3", "21:9", "9:21"
         ])
-        gen_lay.addWidget(self.combo_ratio, 1, 1)
+        gen_lay.addWidget(self.combo_ratio, 2, 1)
 
-        gen_lay.addWidget(QLabel("Resolution Ratio:", self), 2, 0)
+        gen_lay.addWidget(QLabel("Resolution Ratio:", self), 3, 0)
         self.combo_resolution = QComboBox(self)
         self.combo_resolution.addItems(["1K", "2K", "4K"])
         self.combo_resolution.setCurrentText("1K")
         self.combo_resolution.setEnabled(False) # Locked by default for free generations
-        gen_lay.addWidget(self.combo_resolution, 2, 1)
+        gen_lay.addWidget(self.combo_resolution, 3, 1)
 
         h_dl_lay = QHBoxLayout()
         self.lbl_download_dir_title = QLabel("Download Folder:", self)
@@ -736,6 +746,7 @@ class EasemateAIAutomationWidget(QWidget):
         self.settings.model = self.combo_model.currentText()
         self.settings.ratio = self.combo_ratio.currentText()
         self.settings.resolution = self.combo_resolution.currentText()
+        self.settings.generation_mode = self.combo_gen_mode.currentText()
         self.settings.thread_count = 1 # Force sequential execution to avoid concurrent VPN/session conflicts
         self.settings.submit_and_close = self.chk_submit_and_close.isChecked()
 
@@ -1091,10 +1102,10 @@ class EasemateAIAutomationWidget(QWidget):
         self.settings.headless = self.chk_headless.isChecked()
         self.settings.active_profile_name = "Easemate_Free"
         self.settings.easemate_loading_timeout_sec = self.spin_loading_timeout.value()
-        self.settings.model = self.combo_model.currentText()
         self.settings.ratio = self.combo_ratio.currentText()
         self.settings.resolution = self.combo_resolution.currentText()
-        self.settings.thread_count = self.spin_threads.value()
+        self.settings.generation_mode = self.combo_gen_mode.currentText()
+        self.settings.thread_count = 1
 
         self.runner = EasemateBatchRunner(
             jobs_to_dl, self.settings, db=self.db, session_id=self.current_session_id, mode="download_only"
