@@ -260,20 +260,42 @@ class EasemateBrowserWorker:
             
         page.wait_for_timeout(3000)
 
-        # Switch to Text to Image mode
-        self.log_info("Switching to Text to Image mode...")
-        text_to_image_tab = page.locator("button:has-text('Text to Image'), span:has-text('Text to Image'), div:has-text('Text to Image')").first
-        try:
-            text_to_image_tab.wait_for(state="visible", timeout=15000)
+        # Switch to correct mode (Image to Image or Text to Image)
+        if job.has_reference:
+            self.log_info("Switching to Image to Image mode...")
+            img_to_img_tab = page.locator("button:has-text('Image to Image'), span:has-text('Image to Image'), div:has-text('Image to Image')").first
             try:
-                text_to_image_tab.scroll_into_view_if_needed()
-            except Exception:
-                pass
-            text_to_image_tab.click()
-            self.log_info("Successfully switched to Text to Image mode.")
-            page.wait_for_timeout(1000)
-        except Exception as e:
-            self.log_info(f"Warning: Text to Image tab not visible or failed to load: {e}")
+                img_to_img_tab.wait_for(state="visible", timeout=15000)
+                try:
+                    img_to_img_tab.scroll_into_view_if_needed()
+                except Exception:
+                    pass
+                img_to_img_tab.click()
+                self.log_info("Successfully switched to Image to Image mode.")
+                page.wait_for_timeout(1500)
+                
+                # Upload the reference image
+                self.log_info(f"Uploading reference image: {job.reference_image}...")
+                file_input = page.locator("input[type='file']").first
+                file_input.set_input_files(str(job.reference_image))
+                self.log_info("Successfully attached reference image.")
+                page.wait_for_timeout(2000)
+            except Exception as e:
+                self.log_info(f"Warning: Image to Image tab / upload failed: {e}")
+        else:
+            self.log_info("Switching to Text to Image mode...")
+            text_to_image_tab = page.locator("button:has-text('Text to Image'), span:has-text('Text to Image'), div:has-text('Text to Image')").first
+            try:
+                text_to_image_tab.wait_for(state="visible", timeout=15000)
+                try:
+                    text_to_image_tab.scroll_into_view_if_needed()
+                except Exception:
+                    pass
+                text_to_image_tab.click()
+                self.log_info("Successfully switched to Text to Image mode.")
+                page.wait_for_timeout(1000)
+            except Exception as e:
+                self.log_info(f"Warning: Text to Image tab not visible or failed to load: {e}")
 
         # 1. Model Selection
         model = self.settings.model

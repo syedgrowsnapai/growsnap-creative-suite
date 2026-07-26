@@ -2,6 +2,7 @@ import os
 import time
 import subprocess
 import threading
+from typing import Optional
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QSplitter, QScrollArea,
@@ -19,10 +20,10 @@ from dola_automation.easemate_worker import EasemateBatchRunner
 from dola_automation.logger import logger
 from dola_automation.database import HistoryDatabase
 
-def parse_easemate_csv(content_or_path: str) -> list[tuple[str, str, str]]:
+def parse_easemate_csv(content_or_path: str) -> list[tuple[str, str, str, Optional[str]]]:
     """
-    Parses CSV content or filepath mapping multi-mockup columns.
-    Returns a list of tuples: (prompt, video_title, suffix)
+    Parses CSV content or filepath mapping multi-mockup columns and reference images.
+    Returns a list of tuples: (prompt, video_title, suffix, reference_image)
     """
     import io
     import csv
@@ -47,6 +48,13 @@ def parse_easemate_csv(content_or_path: str) -> list[tuple[str, str, str]]:
             
         header = [col.strip().lower() for col in rows[0]]
         
+        # Look for reference image column
+        ref_image_idx = -1
+        for idx, col in enumerate(header):
+            if any(k in col for k in ["reference_image", "ref_image", "image_path", "image_file", "local_image"]):
+                ref_image_idx = idx
+                break
+                
         # Detect multi-mockup columns
         if "product_title" in header or any(col.startswith("mockup_") for col in header):
             title_idx = header.index("product_title") if "product_title" in header else -1
@@ -81,20 +89,56 @@ def parse_easemate_csv(content_or_path: str) -> list[tuple[str, str, str]]:
                 card_id_prefix = f"[{row[card_id_idx].strip()}] " if card_id_idx != -1 and card_id_idx < len(row) and row[card_id_idx].strip() else ""
                 prod_title = row[title_idx].strip() if title_idx != -1 and title_idx < len(row) else f"Product {r_idx + 1}"
                 
+                ref_img_val = None
+                if ref_image_idx != -1 and ref_image_idx < len(row):
+                    ref_img_val = row[ref_image_idx].strip() or None
+                
                 for col_idx, suffix in mockup_cols:
                     if col_idx < len(row) and row[col_idx].strip():
                         prompt_val = row[col_idx].strip()
                         full_title = f"{card_id_prefix}{prod_title} - {suffix}"
-                        results.append((prompt_val, full_title, suffix))
+                        results.append((prompt_val, full_title, suffix, ref_img_val))
             if results:
                 return results
     except Exception as e:
         logger.error(f"Error parsing CSV in Easemate layout: {e}")
         
-    # Standard fallback
+    # Standard fallback layout parsing
+    try:
+        f = io.StringIO(normalized)
+        reader = csv.reader(f)
+        rows = list(reader)
+        if rows:
+            header = [col.strip().lower() for col in rows[0]]
+            prompt_idx = -1
+            ref_image_idx = -1
+            title_idx = -1
+            
+            for i, col in enumerate(header):
+                if "prompt" in col or "text" in col:
+                    prompt_idx = i
+                elif any(k in col for k in ["reference_image", "ref_image", "image_path", "image_file", "local_image"]):
+                    ref_image_idx = i
+                elif "title" in col or "name" in col:
+                    title_idx = i
+                    
+            if prompt_idx != -1:
+                results = []
+                for idx, row in enumerate(rows[1:]):
+                    if not row or len(row) <= prompt_idx:
+                        continue
+                    p = row[prompt_idx].strip()
+                    t = row[title_idx].strip() if title_idx != -1 and title_idx < len(row) else f"Image_{idx+1}"
+                    ref = row[ref_image_idx].strip() if ref_image_idx != -1 and ref_image_idx < len(row) else None
+                    if p:
+                        results.append((p, t, "image", ref))
+                return results
+    except Exception:
+        pass
+        
     from dola_automation.models import parse_prompts
     std_parsed = parse_prompts(content)
-    return [(p, title or f"Image_{idx+1}", "image") for idx, (p, c, title, s_idx) in enumerate(std_parsed)]
+    return [(p, title or f"Image_{idx+1}", "image", None) for idx, (p, c, title, s_idx) in enumerate(std_parsed)]
 
 
 class EasemateAIAutomationWidget(QWidget):
@@ -573,12 +617,13 @@ class EasemateAIAutomationWidget(QWidget):
             return
 
         self.jobs.clear()
-        for idx, (prompt, title, suffix) in enumerate(parsed):
+        for idx, (prompt, title, suffix, ref_img) in enumerate(parsed):
             job = PromptJob(
                 index=idx + 1,
                 prompt=prompt,
                 video_title=title,
                 caption=suffix,
+                reference_image=Path(self._translate_windows_path(ref_img)) if ref_img else None,
                 status=JobStatus.PENDING
             )
             self.jobs.append(job)
