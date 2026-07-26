@@ -162,8 +162,44 @@ del "%~f0"
         else:
             if installer_path.endswith('.zip'):
                 app_dir = Path(__file__).resolve().parent.parent.parent
-                subprocess.Popen(f"unzip -o '{installer_path}' -d '{app_dir}'", shell=True)
-                return True
+                try:
+                    import zipfile
+                    import shutil
+                    temp_extract = Path(tempfile.gettempdir()) / "growsnap_extracted_linux"
+                    if temp_extract.exists():
+                        shutil.rmtree(temp_extract)
+                    
+                    with zipfile.ZipFile(installer_path, 'r') as zip_ref:
+                        zip_ref.extractall(temp_extract)
+                        
+                    # Find the root folder inside the zip
+                    root_folder = next(temp_extract.iterdir()).name
+                    source_dir = temp_extract / root_folder
+                    
+                    # Copy all contents from source_dir to app_dir
+                    for item in source_dir.iterdir():
+                        dest = app_dir / item.name
+                        if item.is_dir():
+                            if dest.exists():
+                                shutil.rmtree(dest)
+                            shutil.copytree(item, dest)
+                        else:
+                            shutil.copy2(item, dest)
+                            
+                    shutil.rmtree(temp_extract)
+                    try:
+                        os.unlink(installer_path)
+                    except Exception:
+                        pass
+                        
+                    print("[Updater] Linux update files applied successfully! Restarting process...")
+                    # Automatically restart the Python process to apply the updates
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
+                    return True
+                except Exception as extract_err:
+                    print(f"[Updater] Native zip extraction failed: {extract_err}", file=sys.stderr)
+                    subprocess.Popen(f"unzip -o '{installer_path}' -d '{app_dir}'", shell=True)
+                    return True
             else:
                 subprocess.Popen(["chmod", "+x", installer_path])
                 subprocess.Popen([installer_path], shell=True)
