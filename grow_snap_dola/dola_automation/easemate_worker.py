@@ -132,9 +132,11 @@ class EasemateBrowserWorker:
         
         self.log_info("Navigating to easemate.ai...")
         page.goto("https://www.easemate.ai/ai-image-generator", wait_until="domcontentloaded", timeout=loading_timeout_ms)
+        self.log_info("Navigation completed.")
         
         # Force browser to focus on page DOM and dismiss suggestions / info bubbles
         try:
+            self.log_info("Dismissing browser input popups...")
             page.locator("body").click()
             page.keyboard.press("Escape")
             page.wait_for_timeout(1000)
@@ -152,11 +154,8 @@ class EasemateBrowserWorker:
         # Wait up to dynamic timeout for page components to load
         self.log_info(f"Waiting up to {loading_timeout_sec} seconds for EaseMate UI components to load...")
         try:
-            page.wait_for_selector("xpath=//button[contains(., 'Text to Image')] | //span[text()='Text to Image']", state="visible", timeout=loading_timeout_ms)
+            page.wait_for_selector("text=Text to Image", state="visible", timeout=loading_timeout_ms)
             self.log_info("EaseMate UI components detected successfully.")
-            
-            # No zoom scaling to avoid absolute/fixed dropdown positioning misalignments
-            pass
         except Exception as e:
             self.log_info(f"Warning: Timeout waiting for main UI components: {e}")
             
@@ -164,14 +163,17 @@ class EasemateBrowserWorker:
 
         # Switch to Text to Image mode
         self.log_info("Switching to Text to Image mode...")
-        text_to_image_tab = page.locator("xpath=//button[contains(., 'Text to Image')] | //span[text()='Text to Image']").first
+        text_to_image_tab = page.locator("text=Text to Image").first
         if text_to_image_tab.is_visible():
             try:
                 text_to_image_tab.scroll_into_view_if_needed()
             except Exception:
                 pass
             text_to_image_tab.click()
+            self.log_info("Successfully switched to Text to Image mode.")
             page.wait_for_timeout(1000)
+        else:
+            self.log_info("Text to Image tab not visible, skipping switch.")
 
         # 1. Model Selection
         model = self.settings.model
