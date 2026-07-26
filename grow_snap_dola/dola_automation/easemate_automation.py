@@ -707,10 +707,15 @@ class EasemateAIAutomationWidget(QWidget):
         self.runner.job_progress.connect(self._on_runner_progress)
         self.runner.job_finished.connect(self._on_runner_finished)
         self.runner.batch_finished.connect(self._on_runner_done)
+        self.runner.profile_rotated.connect(self._on_runner_profile_rotated)
         self.runner.start()
 
     def _on_runner_progress(self, index: int, message: str):
         self.txt_log.appendPlainText(message)
+
+    def _on_runner_profile_rotated(self, next_profile: str):
+        self.settings.active_profile_name = next_profile
+        logger.info(f"UI Settings updated with next rotated profile: {next_profile}")
 
     def _on_runner_finished(self, index: int, success: bool, download_path: str, error: str):
         self._refresh_table()

@@ -193,28 +193,23 @@ class EasemateBrowserWorker:
         loading_timeout_ms = loading_timeout_sec * 1000
         page.set_default_timeout(loading_timeout_ms)
         
-        # First load the homepage to clear cookies and storage natively
-        self.log_info("Navigating to easemate.ai to cleanse session storage...")
+        # First load the homepage to clear cookies and storage natively via CDP
+        self.log_info("Navigating to easemate.ai homepage to cleanse storage...")
         try:
             page.goto("https://www.easemate.ai/", wait_until="domcontentloaded", timeout=30000)
+            
+            # Execute CDP clean storage command
+            client = context.new_cdp_session(page)
+            client.send("Storage.clearDataForOrigin", {
+                "origin": "https://www.easemate.ai",
+                "storageTypes": "all"
+            })
+            self.log_info("Successfully cleared all data (cache, cookies, local storage, service workers) for https://www.easemate.ai via CDP.")
+            
             context.clear_cookies()
-            page.evaluate("""
-                try { window.localStorage.clear(); } catch(e) {}
-                try { window.sessionStorage.clear(); } catch(e) {}
-                try {
-                    if (window.indexedDB && window.indexedDB.databases) {
-                        window.indexedDB.databases().then(dbs => {
-                            dbs.forEach(db => {
-                                try { window.indexedDB.deleteDatabase(db.name); } catch(err) {}
-                            });
-                        });
-                    }
-                } catch(e) {}
-            """)
             page.wait_for_timeout(1000)
-            self.log_info("Cleared cookies, localStorage, and IndexedDB successfully.")
         except Exception as e:
-            self.log_info(f"Warning clearing session storage: {e}")
+            self.log_info(f"Warning clearing session storage via CDP/Cookies: {e}")
             
         self.log_info("Navigating to EaseMate Generator...")
         page.goto("https://www.easemate.ai/ai-image-generator", wait_until="domcontentloaded", timeout=loading_timeout_ms)
@@ -239,7 +234,7 @@ class EasemateBrowserWorker:
             
         # Check auth warning / login alert immediately on page load
         try:
-            login_el = page.locator("text='Please login to use', text='Please log in to use', text='login to use'").first
+            login_el = page.locator("div:has-text('Please login to use'), span:has-text('Please login to use'), div:has-text('Please log in to use'), span:has-text('Please log in to use'), *:has-text('Please login to use'), *:has-text('Please log in to use')").first
             if login_el.is_visible():
                 job.error = "Please login to use"
                 self.log_info("Detected EaseMate Login Prompt alert on page load. Exiting to rotate profile.")
@@ -453,10 +448,10 @@ class EasemateBrowserWorker:
         for _ in range(60): # 30 seconds (60 * 500ms)
             page.wait_for_timeout(500)
             try:
-                login_el = page.locator("text='Please login to use', text='Please log in to use', text='login to use'").first
+                login_el = page.locator("div:has-text('Please login to use'), span:has-text('Please login to use'), div:has-text('Please log in to use'), span:has-text('Please log in to use'), *:has-text('Please login to use'), *:has-text('Please log in to use')").first
                 if login_el.is_visible():
                     job.error = "Please login to use"
-                    self.log_info("Detected EaseMate Login Prompt alert post-click.")
+                    self.log_info("Detected EaseMate Login Prompt alert post-click. Exiting to rotate profile.")
                     return False
             except Exception:
                 pass
@@ -726,25 +721,27 @@ class EasemateBatchRunner(QThread):
                 error_msg = str(e)
                 logger.error(f"Error executing job #{job.index} (attempt {retries+1}): {e}", exc_info=True)
                 
-            if not success and thread_settings.auto_rotate_profiles:
+            if not success:
                 lower_err = error_msg.lower()
                 if any(x in lower_err for x in ["limit", "quota", "credit", "point", "login", "log in"]):
-                    profiles = []
-                    if thread_settings.profile_list_str:
-                        profiles = [p.strip() for p in thread_settings.profile_list_str.split(',') if p.strip()]
-                    if not profiles:
-                        profiles_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles'
-                        if profiles_dir.exists():
-                            profiles = sorted([d.name for d in profiles_dir.iterdir() if d.is_dir()])
-                    
-                    if profiles and thread_settings.active_profile_name in profiles:
-                        curr_idx = profiles.index(thread_settings.active_profile_name)
-                        next_idx = (curr_idx + 1) % len(profiles)
-                        next_profile = profiles[next_idx]
-                        logger.info(f"Limit Hit! Rotating Easemate profile: {thread_settings.active_profile_name} -> {next_profile}")
-                        thread_settings.active_profile_name = next_profile
-                        self.profile_rotated.emit(next_profile)
-                        self.job_progress.emit(job.index, f"Quota exceeded. Auto-rotated to profile: {next_profile}")
+                    curr_profile = thread_settings.active_profile_name or "Easemate_Free"
+                    if "_" in curr_profile:
+                        try:
+                            base, num_str = curr_profile.rsplit("_", 1)
+                            if num_str.isdigit():
+                                next_num = int(num_str) + 1
+                                next_profile = f"{base}_{next_num}"
+                            else:
+                                next_profile = f"{curr_profile}_1"
+                        except Exception:
+                            next_profile = f"{curr_profile}_1"
+                    else:
+                        next_profile = f"{curr_profile}_1"
+                        
+                    logger.info(f"Limit/Login alert hit! Rotating EaseMate profile: {curr_profile} -> {next_profile}")
+                    thread_settings.active_profile_name = next_profile
+                    self.profile_rotated.emit(next_profile)
+                    self.job_progress.emit(job.index, f"Quota/Login alert detected. Auto-rotated to profile: {next_profile}")
                 
             retries += 1
             if retries < max_retries and not self._stop:
