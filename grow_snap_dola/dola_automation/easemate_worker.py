@@ -64,6 +64,29 @@ class EasemateBrowserWorker:
         # Determine profile directory path
         profile_name = getattr(self.settings, 'active_profile_name', 'Default')
         profile_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / profile_name
+        
+        # If submitting, clear existing cookies/local storage files on disk to bypass free-tier limits
+        if mode != "download_only" and profile_dir.exists():
+            import shutil
+            paths_to_delete = [
+                profile_dir / "Default" / "Network" / "Cookies",
+                profile_dir / "Default" / "Cookies",
+                profile_dir / "Default" / "Local Storage",
+                profile_dir / "Default" / "Session Storage",
+                profile_dir / "Default" / "IndexedDB",
+                profile_dir / "Default" / "Service Worker",
+                profile_dir / "Default" / "Cache",
+                profile_dir / "Default" / "Code Cache"
+            ]
+            for p_to_del in paths_to_delete:
+                try:
+                    if p_to_del.is_dir():
+                        shutil.rmtree(p_to_del)
+                    elif p_to_del.is_file():
+                        p_to_del.unlink()
+                except Exception:
+                    pass
+                    
         profile_dir.mkdir(parents=True, exist_ok=True)
         self.log_info(f"Using persistent browser profile: {profile_name} at {profile_dir}")
         
@@ -132,15 +155,7 @@ class EasemateBrowserWorker:
         
         self.log_info("Navigating to easemate.ai...")
         page.goto("https://www.easemate.ai/ai-image-generator", wait_until="domcontentloaded", timeout=loading_timeout_ms)
-        self.log_info("Navigation completed. Cleansing anonymous session storage...")
-        
-        try:
-            context.clear_cookies()
-            page.evaluate("window.localStorage.clear(); window.sessionStorage.clear();")
-            self.log_info("Cleared cookies and local storage. Refreshing to apply...")
-            page.goto("https://www.easemate.ai/ai-image-generator", wait_until="domcontentloaded", timeout=loading_timeout_ms)
-        except Exception as e:
-            self.log_info(f"Warning: Failed to clear browser storage: {e}")
+        self.log_info("Navigation completed.")
         
         # Force browser to focus on page DOM and dismiss suggestions / info bubbles
         try:
