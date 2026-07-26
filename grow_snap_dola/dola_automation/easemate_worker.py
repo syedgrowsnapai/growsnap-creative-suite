@@ -131,13 +131,6 @@ class EasemateBrowserWorker:
         session_path = self._get_job_session_path(job.index)
         success = False
         
-        # Auto-rotate VPN IP before starting submission jobs to bypass backend rate-limiting/guest blockades
-        if mode != "download_only":
-            try:
-                VPNRotator.rotate_vpn(self.log_info)
-            except Exception as e:
-                self.log_info(f"Warning: Failed to rotate NordVPN connection: {e}")
-                
         with sync_playwright() as p:
             launch_args = []
             if os.name != 'nt':
@@ -244,10 +237,20 @@ class EasemateBrowserWorker:
         except Exception:
             pass
             
+        # Check auth warning / login alert immediately on page load
+        try:
+            login_el = page.locator("text='Please login to use', text='Please log in to use', text='login to use'").first
+            if login_el.is_visible():
+                job.error = "Please login to use"
+                self.log_info("Detected EaseMate Login Prompt alert on page load. Exiting to rotate profile.")
+                return False
+        except Exception:
+            pass
+
         # Wait up to dynamic timeout for page components to load
         self.log_info(f"Waiting up to {loading_timeout_sec} seconds for EaseMate UI components to load...")
         try:
-            page.wait_for_selector("text=Text to Image", state="visible", timeout=loading_timeout_ms)
+            page.wait_for_selector("xpath=//button[contains(., 'Text to Image')] | //span[text()='Text to Image']", state="visible", timeout=loading_timeout_ms)
             self.log_info("EaseMate UI components detected successfully.")
         except Exception as e:
             self.log_info(f"Warning: Timeout waiting for main UI components: {e}")
@@ -256,7 +259,7 @@ class EasemateBrowserWorker:
 
         # Switch to Text to Image mode
         self.log_info("Switching to Text to Image mode...")
-        text_to_image_tab = page.locator("text=Text to Image").first
+        text_to_image_tab = page.locator("xpath=//button[contains(., 'Text to Image')] | //span[text()='Text to Image']").first
         try:
             text_to_image_tab.wait_for(state="visible", timeout=20000)
             try:
@@ -445,9 +448,18 @@ class EasemateBrowserWorker:
         gen_btn.click()
         self.log_info("Generate button clicked. Submission sent.")
 
-        # Wait 30 seconds unconditionally after submitting the request
+        # Wait 30 seconds unconditionally after submitting the request, checking for login alerts
         self.log_info("Waiting 30 seconds for submission buffers...")
-        page.wait_for_timeout(30000)
+        for _ in range(60): # 30 seconds (60 * 500ms)
+            page.wait_for_timeout(500)
+            try:
+                login_el = page.locator("text='Please login to use', text='Please log in to use', text='login to use'").first
+                if login_el.is_visible():
+                    job.error = "Please login to use"
+                    self.log_info("Detected EaseMate Login Prompt alert post-click.")
+                    return False
+            except Exception:
+                pass
 
         # Save mid-flight session storage just in case we need it for download mode
         try:
@@ -716,7 +728,7 @@ class EasemateBatchRunner(QThread):
                 
             if not success and thread_settings.auto_rotate_profiles:
                 lower_err = error_msg.lower()
-                if "limit exceeded" in lower_err or "quota reached" in lower_err or "out of credits" in lower_err or "points" in lower_err:
+                if any(x in lower_err for x in ["limit", "quota", "credit", "point", "login", "log in"]):
                     profiles = []
                     if thread_settings.profile_list_str:
                         profiles = [p.strip() for p in thread_settings.profile_list_str.split(',') if p.strip()]
