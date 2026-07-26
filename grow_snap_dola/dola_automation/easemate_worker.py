@@ -236,23 +236,50 @@ class EasemateBrowserWorker:
 
         # 2. Enter Prompt
         self.log_info(f"Pasting prompt: {job.prompt[:60]}...")
+        
+        # Click Escape first to dismiss any stray model menus covering elements
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(500)
+        except Exception:
+            pass
+            
         try:
             page.wait_for_selector("textarea", state="visible", timeout=10000)
             self.log_info("Detected visible textarea on page.")
         except Exception as e:
             self.log_info(f"Warning: Timeout waiting for textarea visibility: {e}")
             
-        textarea = page.locator("textarea").first
-        if not textarea.is_visible():
-            textarea = page.locator("textarea[placeholder*='prompt'], textarea[placeholder*='Prompt']").first
+        textarea = None
+        try:
+            all_tas = page.locator("textarea").all()
+            for ta in all_tas:
+                if ta.is_visible():
+                    textarea = ta
+                    break
+        except Exception as e:
+            self.log_info(f"Error checking textareas: {e}")
             
-        if textarea.is_visible():
+        if not textarea:
+            textarea = page.locator("textarea").first
+            
+        if textarea and textarea.is_visible():
             try:
                 textarea.scroll_into_view_if_needed()
             except Exception:
                 pass
             textarea.click()
-            textarea.fill("")
+            page.wait_for_timeout(300)
+            
+            # Select all and delete default prompt
+            try:
+                page.keyboard.press("Control+A")
+                page.keyboard.press("Backspace")
+                page.wait_for_timeout(300)
+                textarea.fill("")
+            except Exception as e:
+                self.log_info(f"Warning: failed to clear textarea via keyboard: {e}")
+                
             textarea.fill(job.prompt)
             page.wait_for_timeout(1000)
         else:
@@ -315,6 +342,20 @@ class EasemateBrowserWorker:
             pass
         gen_btn.click()
 
+        # Wait for potential CAPTCHA verification / Submission progress (up to 45 seconds)
+        self.log_info("Waiting for captcha verification checks / submission buffers (45 seconds)...")
+        
+        # Wait for redirect to specific chat/job page
+        self.log_info("Waiting for redirect to capture job URL...")
+        base_url = "https://www.easemate.ai/ai-image-generator"
+        for _ in range(30): # up to 15 seconds
+            if page.url.strip("/") != base_url.strip("/"):
+                self.log_info(f"Detected redirect! New URL: {page.url}")
+                break
+            page.wait_for_timeout(500)
+            
+        page.wait_for_timeout(30000)
+
         # Save mid-flight session storage just in case we need it for download mode
         try:
             job.chat_url = page.url
@@ -326,10 +367,6 @@ class EasemateBrowserWorker:
         except Exception as e:
             self.log_info(f"Failed to perform session save: {e}")
 
-        # Wait for potential CAPTCHA verification / Submission progress (up to 45 seconds)
-        self.log_info("Waiting for captcha verification checks / submission buffers (45 seconds)...")
-        page.wait_for_timeout(45000)
-
         if self.settings.submit_and_close:
             job.status = JobStatus.SUBMITTED
             return True
@@ -338,15 +375,27 @@ class EasemateBrowserWorker:
         return self._wait_and_download(page, job)
 
     def _execute_download_only(self, page: Page, context: BrowserContext, job: PromptJob) -> bool:
-        self.log_info("Navigating to EaseMate...")
-        page.goto("https://www.easemate.ai/ai-image-generator", wait_until="domcontentloaded")
+        if not job.chat_url:
+            raise Exception("Job does not have a saved chat URL to download from.")
+        self.log_info(f"Navigating directly to job URL: {job.chat_url}")
+        page.goto(job.chat_url, wait_until="domcontentloaded")
         page.wait_for_timeout(5000)
         return self._wait_and_download(page, job)
 
     def _wait_and_download(self, page: Page, job: PromptJob) -> bool:
         self.log_info("Polling for generated image download button...")
-        download_btn = page.locator("button:has-text('Recreate') + button, button[class*='download']").first
         
+        download_btn_selectors = [
+            "button:has-text('Recreate') + button",
+            "button[class*='download']",
+            "button:has-text('Download')",
+            "a[download]",
+            "a:has-text('Download')",
+            "xpath=//button[contains(., 'Download')]",
+            "xpath=//a[contains(., 'Download')]"
+        ]
+        
+        download_btn = None
         max_polls = 10
         poll_interval = 30000 # 30 seconds
         for attempt in range(max_polls):
@@ -354,14 +403,23 @@ class EasemateBrowserWorker:
                 self.log_info("Job execution cancelled by user.")
                 return False
                 
-            if download_btn.is_visible():
+            for sel in download_btn_selectors:
+                try:
+                    btn = page.locator(sel).first
+                    if btn.is_visible():
+                        download_btn = btn
+                        break
+                except Exception:
+                    pass
+                    
+            if download_btn:
                 self.log_info("Download button detected! Image is ready.")
                 break
             else:
                 self.log_info(f"Generation in progress. Retrying download detection in 30s (Attempt {attempt+1}/{max_polls})...")
                 page.wait_for_timeout(poll_interval)
         
-        if not download_btn.is_visible():
+        if not download_btn:
             raise Exception("Generation timed out. Download button did not appear within 5 minutes.")
         
         self.log_info("Initiating high-resolution image download...")
