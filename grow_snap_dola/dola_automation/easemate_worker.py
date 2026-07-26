@@ -171,12 +171,8 @@ class EasemateBrowserWorker:
             page.wait_for_selector("xpath=//button[contains(., 'Text to Image')] | //span[text()='Text to Image']", state="visible", timeout=loading_timeout_ms)
             self.log_info("EaseMate UI components detected successfully.")
             
-            # Zoom out
-            try:
-                page.evaluate("document.body.style.zoom = '0.8'")
-                self.log_info("Zoomed viewport out to 80% for layout visibility.")
-            except Exception:
-                pass
+            # No zoom scaling to avoid absolute/fixed dropdown positioning misalignments
+            pass
         except Exception as e:
             self.log_info(f"Warning: Timeout waiting for main UI components: {e}")
             
