@@ -119,6 +119,30 @@ class EasemateBrowserWorker:
                 
             page.set_default_navigation_timeout(60000)
             
+            # Anti-detection Playwright stealth injection
+            try:
+                page.add_init_script("""
+                    // Hide webdriver property
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    });
+                    // Spoof chrome properties
+                    window.chrome = {
+                        runtime: {}
+                    };
+                    // Spoof browser plugins
+                    Object.defineProperty(navigator, 'plugins', {
+                        get: () => [1, 2, 3, 4, 5]
+                    });
+                    // Spoof preferred languages
+                    Object.defineProperty(navigator, 'languages', {
+                        get: () => ['en-US', 'en']
+                    });
+                """)
+                self.log_info("Successfully injected anti-detection script (stealth) into page.")
+            except Exception as e:
+                self.log_info(f"Warning: Failed to inject anti-detection script: {e}")
+            
             try:
                 if mode == "download_only":
                     self.log_info(f"Opening browser to download for job #{job.index}...")
