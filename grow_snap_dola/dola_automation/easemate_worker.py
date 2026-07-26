@@ -724,7 +724,11 @@ class EasemateBatchRunner(QThread):
             if not success:
                 lower_err = error_msg.lower()
                 if any(x in lower_err for x in ["limit", "quota", "credit", "point", "login", "log in"]):
-                    self.job_progress.emit(job.index, "Login/Quota warning detected. Retrying with a clean browser session...")
+                    self.job_progress.emit(job.index, "Login/Quota warning detected. Rotating NordVPN IP region...")
+                    try:
+                        VPNRotator.rotate_vpn(lambda msg: self.job_progress.emit(job.index, msg))
+                    except Exception as vpn_err:
+                        self.job_progress.emit(job.index, f"Warning: NordVPN rotation failed: {vpn_err}")
                 
             retries += 1
             if retries < max_retries and not self._stop:
