@@ -688,7 +688,7 @@ class EasemateAIAutomationWidget(QWidget):
         self.settings.model = self.combo_model.currentText()
         self.settings.ratio = self.combo_ratio.currentText()
         self.settings.resolution = self.combo_resolution.currentText()
-        self.settings.thread_count = self.spin_threads.value()
+        self.settings.thread_count = 1 # Force sequential execution to avoid concurrent VPN/session conflicts
         self.settings.submit_and_close = self.chk_submit_and_close.isChecked()
 
         # Save session in database
