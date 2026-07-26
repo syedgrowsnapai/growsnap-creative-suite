@@ -24,6 +24,67 @@ from dola_automation.models import AutomationSettings, PromptJob, JobStatus
 from dola_automation.logger import logger
 from dola_automation.database import HistoryDatabase
 
+class VPNRotator:
+    _lock = threading.Lock()
+    _last_rotate_time = 0.0
+    _current_country_idx = 0
+    
+    # Supported countries by both Dola and NordVPN
+    countries = [
+        "Singapore", "Japan", "United Kingdom", "Germany", "France", 
+        "Italy", "Australia", "Spain", "Netherlands", 
+        "Sweden", "Switzerland", "New Zealand"
+    ]
+    
+    @classmethod
+    def get_last_rotate_time(cls) -> float:
+        return cls._last_rotate_time
+
+    @classmethod
+    def rotate_vpn(cls, log_fn=None) -> bool:
+        with cls._lock:
+            # Prevent rapid back-to-back rotations by multiple threads
+            now = time.time()
+            if now - cls._last_rotate_time < 30.0:
+                if log_fn:
+                    log_fn("VPN was recently rotated. Waiting for connection stability...")
+                time.sleep(10)
+                return True
+                
+            cls._last_rotate_time = now
+            import subprocess
+            cls._current_country_idx = (cls._current_country_idx + 1) % len(cls.countries)
+            target_country = cls.countries[cls._current_country_idx]
+            
+            if log_fn:
+                log_fn(f"NordVPN: Triggering auto-rotation to: {target_country}...")
+                
+            try:
+                if os.name == 'nt': # Windows
+                    nord_path = r"C:\Program Files\NordVPN\nordvpn.exe"
+                    if os.path.exists(nord_path):
+                        cmd = [nord_path, "-c", "-g", target_country]
+                    else:
+                        cmd = ["nordvpn", "-c", "-g", target_country]
+                elif os.path.exists("/mnt/c/Program Files/NordVPN/nordvpn.exe"): # WSL (Windows Subsystem for Linux)
+                    nord_path = "/mnt/c/Program Files/NordVPN/nordvpn.exe"
+                    cmd = [nord_path, "-c", "-g", target_country]
+                else: # Linux
+                    cmd = ["nordvpn", "connect", target_country]
+                    
+                # Run connect command
+                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=20)
+                if log_fn:
+                    log_fn(f"NordVPN connect command finished. Status: {res.returncode}. Output: {res.stdout.strip()} {res.stderr.strip()}")
+                
+                # Wait 10 seconds for IP allocation and connection to establish
+                time.sleep(10)
+                return True
+            except Exception as e:
+                if log_fn:
+                    log_fn(f"NordVPN connection command failed: {e}")
+                return False
+
 class EasemateAutomationError(Exception):
     pass
 
@@ -70,6 +131,13 @@ class EasemateBrowserWorker:
         session_path = self._get_job_session_path(job.index)
         success = False
         
+        # Auto-rotate VPN IP before starting submission jobs to bypass backend rate-limiting/guest blockades
+        if mode != "download_only":
+            try:
+                VPNRotator.rotate_vpn(self.log_info)
+            except Exception as e:
+                self.log_info(f"Warning: Failed to rotate NordVPN connection: {e}")
+                
         with sync_playwright() as p:
             launch_args = []
             if os.name != 'nt':
