@@ -505,6 +505,10 @@ class EasemateBrowserWorker:
             "button:has-text('Download')",
             "a[download]",
             "a:has-text('Download')",
+            "button:has(svg[class*='download'])",
+            "button:has(svg)",
+            "a:has(svg)",
+            "div.cursor-pointer:has(svg)",
             "xpath=//button[contains(., 'Download')]",
             "xpath=//a[contains(., 'Download')]"
         ]
@@ -528,17 +532,39 @@ class EasemateBrowserWorker:
                 for img in imgs:
                     alt = (img.get_attribute("alt") or "").strip().lower()
                     if alt and (short_prompt in alt or alt in clean_prompt):
+                        self.log_info(f"Found candidate image card matching prompt alt: '{alt}'")
                         # Walk up to the parent card container and search for download button
                         parent = img
-                        for _ in range(5):
+                        for _ in range(6):
                             parent = parent.locator("..")
+                            
+                            # 1. Try standard selectors
                             for sel in download_btn_selectors:
-                                btn = parent.locator(sel).first
-                                if btn.is_visible():
-                                    download_btn = btn
-                                    break
+                                try:
+                                    btn = parent.locator(sel).first
+                                    if btn.is_visible():
+                                        download_btn = btn
+                                        break
+                                except Exception:
+                                    pass
                             if download_btn:
                                 break
+                                
+                            # 2. Fallback: Search clickable children containing download keywords or SVG structure
+                            try:
+                                clickables = parent.locator("button, a, div.cursor-pointer, [role='button']").all()
+                                for c in clickables:
+                                    html_content = c.inner_html().lower()
+                                    if any(kw in html_content for kw in ["download", "down", "arrow", "svg"]):
+                                        download_btn = c
+                                        break
+                                if not download_btn and len(clickables) >= 2:
+                                    # Second button is usually the download arrow in typical Remix/Download layouts
+                                    download_btn = clickables[1]
+                                    break
+                            except Exception:
+                                pass
+                                
                     if download_btn:
                         break
             except Exception as e:
@@ -554,9 +580,22 @@ class EasemateBrowserWorker:
                             break
                     except Exception:
                         pass
+                
+                # If still not found, scan page buttons containing SVG download indicators
+                if not download_btn:
+                    try:
+                        btns = page.locator("button, a, div.cursor-pointer").all()
+                        for b in btns:
+                            html_content = b.inner_html().lower()
+                            if any(kw in html_content for kw in ["download", "down", "arrow", "svg"]):
+                                if b.is_visible():
+                                    download_btn = b
+                                    break
+                    except Exception:
+                        pass
                         
             if download_btn:
-                self.log_info("Download button detected! Image is ready.")
+                self.log_info("Download button/icon detected! Image is ready.")
                 break
             else:
                 self.log_info(f"Generation in progress. Retrying download detection in 30s (Attempt {attempt+1}/{max_polls})...")

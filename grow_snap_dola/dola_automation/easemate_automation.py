@@ -356,6 +356,8 @@ class EasemateAIAutomationWidget(QWidget):
             "Hunyuan Image 3"
         ]
         self.combo_model.addItems(models_list)
+        self.combo_model.setCurrentText("GPT image 2")
+        self.combo_model.setEnabled(False) # Locked by default for free generations
         gen_lay.addWidget(self.combo_model, 0, 1)
 
         gen_lay.addWidget(QLabel("Aspect Ratio:", self), 1, 0)
@@ -368,7 +370,8 @@ class EasemateAIAutomationWidget(QWidget):
         gen_lay.addWidget(QLabel("Resolution Ratio:", self), 2, 0)
         self.combo_resolution = QComboBox(self)
         self.combo_resolution.addItems(["1K", "2K", "4K"])
-        self.combo_resolution.setCurrentText("4K")
+        self.combo_resolution.setCurrentText("1K")
+        self.combo_resolution.setEnabled(False) # Locked by default for free generations
         gen_lay.addWidget(self.combo_resolution, 2, 1)
 
         h_dl_lay = QHBoxLayout()
