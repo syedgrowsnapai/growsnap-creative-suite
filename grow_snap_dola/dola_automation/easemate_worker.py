@@ -209,23 +209,24 @@ class EasemateBrowserWorker:
         loading_timeout_ms = loading_timeout_sec * 1000
         page.set_default_timeout(loading_timeout_ms)
         
-        # First load the homepage to clear cookies and storage natively via CDP
+        # First load the homepage to clear cookies and storage natively
         self.log_info("Navigating to easemate.ai homepage to cleanse storage...")
         try:
             page.goto("https://www.easemate.ai/", wait_until="domcontentloaded", timeout=30000)
             
-            # Execute CDP clean storage command
-            client = context.new_cdp_session(page)
-            client.send("Storage.clearDataForOrigin", {
-                "origin": "https://www.easemate.ai",
-                "storageTypes": "all"
-            })
-            self.log_info("Successfully cleared all data (cache, cookies, local storage, service workers) for https://www.easemate.ai via CDP.")
-            
+            # Clear cookies natively
             context.clear_cookies()
+            
+            # Clear local storage and session storage natively via JS
+            try:
+                page.evaluate("window.localStorage.clear(); window.sessionStorage.clear();")
+            except Exception:
+                pass
+                
+            self.log_info("Successfully cleared local storage, session storage, and cookies for easemate.ai.")
             page.wait_for_timeout(1000)
         except Exception as e:
-            self.log_info(f"Warning clearing session storage via CDP/Cookies: {e}")
+            self.log_info(f"Warning clearing session storage/Cookies: {e}")
             
         self.log_info("Navigating to EaseMate Generator...")
         page.goto("https://www.easemate.ai/ai-image-generator", wait_until="domcontentloaded", timeout=loading_timeout_ms)
