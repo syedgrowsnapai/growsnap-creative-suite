@@ -232,13 +232,16 @@ class EasemateBrowserWorker:
 
         # 2. Enter Prompt
         self.log_info(f"Pasting prompt: {job.prompt[:60]}...")
+        try:
+            page.wait_for_selector("textarea", state="visible", timeout=10000)
+            self.log_info("Detected visible textarea on page.")
+        except Exception as e:
+            self.log_info(f"Warning: Timeout waiting for textarea visibility: {e}")
+            
         textarea = page.locator("textarea").first
         if not textarea.is_visible():
-            try:
-                page.wait_for_selector("textarea", timeout=5000)
-                textarea = page.locator("textarea").first
-            except Exception:
-                pass
+            textarea = page.locator("textarea[placeholder*='prompt'], textarea[placeholder*='Prompt']").first
+            
         if textarea.is_visible():
             try:
                 textarea.scroll_into_view_if_needed()
@@ -255,25 +258,40 @@ class EasemateBrowserWorker:
         aspect_ratio = self.settings.ratio
         self.log_info(f"Selecting aspect ratio: {aspect_ratio}")
         ratio_btn = None
-        ratio_selectors = [
-            f"xpath=//div[contains(., 'Output Aspect Ratios')]/following-sibling::div//*[text()='{aspect_ratio}']",
-            f"xpath=//*[contains(text(), 'Output Aspect Ratios')]/..//*[text()='{aspect_ratio}']",
-            f"div:has-text('Output Aspect Ratios') + div text='{aspect_ratio}'",
-            f"span:has-text('Output Aspect Ratios') + div text='{aspect_ratio}'",
-            f"text='{aspect_ratio}'"
-        ]
-        for r_sel in ratio_selectors:
-            btn = page.locator(r_sel).first
-            if btn.is_visible():
-                ratio_btn = btn
-                break
+        
+        try:
+            container = page.locator("div, span, p, h1, h2, h3").filter(has_text="Output Aspect Ratios").last
+            if container.is_visible():
+                btn = container.locator(f"text='{aspect_ratio}'").first
+                if btn.is_visible():
+                    ratio_btn = btn
+        except Exception:
+            pass
+            
+        if not ratio_btn:
+            ratio_selectors = [
+                f"xpath=//div[contains(., 'Output Aspect Ratios')]/following-sibling::div//*[text()='{aspect_ratio}']",
+                f"xpath=//*[contains(text(), 'Output Aspect Ratios')]/..//*[text()='{aspect_ratio}']",
+                f"div:has-text('Output Aspect Ratios') + div text='{aspect_ratio}'",
+                f"span:has-text('Output Aspect Ratios') + div text='{aspect_ratio}'",
+                f"text='{aspect_ratio}'"
+            ]
+            for r_sel in ratio_selectors:
+                try:
+                    btn = page.locator(r_sel).first
+                    if btn.is_visible():
+                        ratio_btn = btn
+                        break
+                except Exception:
+                    pass
+                    
         if ratio_btn:
             try:
                 ratio_btn.scroll_into_view_if_needed()
             except Exception:
                 pass
             ratio_btn.click()
-            page.wait_for_timeout(500)
+            page.wait_for_timeout(1000)
         else:
             self.log_info(f"Aspect ratio '{aspect_ratio}' not visible, skipping.")
 

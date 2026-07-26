@@ -405,6 +405,11 @@ class EasemateAIAutomationWidget(QWidget):
         self.spin_loading_timeout.setRange(10, 600)
         self.spin_loading_timeout.setValue(getattr(self.settings, 'easemate_loading_timeout_sec', 300))
         auto_lay.addWidget(self.spin_loading_timeout, 1, 1, 1, 3)
+
+        self.chk_submit_and_close = QCheckBox("Submit && Close Browser (Download Later)", self)
+        self.chk_submit_and_close.setChecked(getattr(self.settings, 'submit_and_close', False))
+        auto_lay.addWidget(self.chk_submit_and_close, 2, 0, 1, 4)
+
         tab_settings_lay.addWidget(automation_group)
         
         tab_settings_lay.addStretch()
@@ -684,6 +689,7 @@ class EasemateAIAutomationWidget(QWidget):
         self.settings.ratio = self.combo_ratio.currentText()
         self.settings.resolution = self.combo_resolution.currentText()
         self.settings.thread_count = self.spin_threads.value()
+        self.settings.submit_and_close = self.chk_submit_and_close.isChecked()
 
         # Save session in database
         session_name = f"Session {time.strftime('%Y-%m-%d %H:%M')}"
@@ -694,8 +700,9 @@ class EasemateAIAutomationWidget(QWidget):
             self.current_session_id = None
 
         # Start QThread BatchRunner
+        runner_mode = "submit_only" if self.settings.submit_and_close else "full"
         self.runner = EasemateBatchRunner(
-            self.jobs, self.settings, db=self.db, session_id=self.current_session_id, mode="full"
+            self.jobs, self.settings, db=self.db, session_id=self.current_session_id, mode=runner_mode
         )
         self.runner.job_progress.connect(self._on_runner_progress)
         self.runner.job_finished.connect(self._on_runner_finished)
@@ -862,6 +869,10 @@ class EasemateAIAutomationWidget(QWidget):
         relaunch_action.triggered.connect(self._context_relaunch_manual)
         actions.append(relaunch_action)
 
+        download_action = menu.addAction("Download Selected Images (Download Only)")
+        download_action.triggered.connect(self._download_selected_jobs)
+        actions.append(download_action)
+
         remove_action = menu.addAction("Clear from List")
         remove_action.triggered.connect(self._context_clear_rows)
         actions.append(remove_action)
@@ -933,7 +944,50 @@ class EasemateAIAutomationWidget(QWidget):
         self.table.selectAll()
 
     def _download_selected_jobs(self):
-        QMessageBox.information(self, "Info", "Batch generation automatically downloads completed items.")
+        if self.runner and self.runner.isRunning():
+            QMessageBox.warning(self, "Runner Active", "Another batch automation process is currently running. Please stop or wait for it to complete.")
+            return
+
+        selected_rows = list(set(index.row() for index in self.table.selectedIndexes()))
+        selected_jobs = [self.jobs[r] for r in selected_rows]
+        
+        if not selected_jobs:
+            selected_jobs = self.jobs
+
+        jobs_to_dl = [j for j in selected_jobs if j.chat_url]
+        skipped_count = len(selected_jobs) - len(jobs_to_dl)
+
+        if not jobs_to_dl:
+            QMessageBox.warning(self, "No Chat URL", "None of the target jobs have a chat URL. Please relaunch them or run prompt submission first.")
+            return
+
+        if skipped_count > 0:
+            self.txt_log.appendPlainText(f"[Info] Skipped {skipped_count} jobs because they do not have a chat URL.")
+
+        self.txt_log.appendPlainText(f"[Info] Downloading {len(jobs_to_dl)} jobs...")
+        self.is_running = True
+        self.is_paused = False
+        self.btn_start.setEnabled(False)
+        self.btn_pause.setEnabled(True)
+        self.btn_stop.setEnabled(True)
+        
+        # Set runner configs
+        self.settings.download_dir = Path(self.lbl_dl_path_show.text())
+        self.settings.headless = self.chk_headless.isChecked()
+        self.settings.active_profile_name = "Easemate_Free"
+        self.settings.easemate_loading_timeout_sec = self.spin_loading_timeout.value()
+        self.settings.model = self.combo_model.currentText()
+        self.settings.ratio = self.combo_ratio.currentText()
+        self.settings.resolution = self.combo_resolution.currentText()
+        self.settings.thread_count = self.spin_threads.value()
+
+        self.runner = EasemateBatchRunner(
+            jobs_to_dl, self.settings, db=self.db, session_id=self.current_session_id, mode="download_only"
+        )
+        self.runner.job_progress.connect(self._on_runner_progress)
+        self.runner.job_finished.connect(self._on_runner_finished)
+        self.runner.batch_finished.connect(self._on_runner_done)
+        self.runner.start()
 
     def _retry_all_failed_jobs(self):
         failed_jobs = [j for j in self.jobs if j.status == JobStatus.FAILED]
