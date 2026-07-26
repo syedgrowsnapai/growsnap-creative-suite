@@ -228,8 +228,9 @@ class EasemateBrowserWorker:
         except Exception as e:
             self.log_info(f"Warning clearing session storage/Cookies: {e}")
             
-        self.log_info("Navigating to EaseMate Generator...")
-        page.goto("https://www.easemate.ai/ai-image-generator", wait_until="domcontentloaded", timeout=loading_timeout_ms)
+        target_url = getattr(self.settings, 'target_url', "https://www.easemate.ai/ai-image-generator")
+        self.log_info(f"Navigating to target URL: {target_url}...")
+        page.goto(target_url, wait_until="domcontentloaded", timeout=loading_timeout_ms)
         self.log_info("Generator page loaded.")
         
         # Force browser to focus on page DOM and dismiss suggestions / info bubbles
@@ -285,13 +286,19 @@ class EasemateBrowserWorker:
         # Switch to correct mode (Image to Image or Text to Image)
         if run_mode == "image":
             self.log_info("Switching to Image to Image mode...")
-            img_to_img_tab = page.locator("button:has-text('Image to Image'), span:has-text('Image to Image'), div:has-text('Image to Image')").first
             try:
+                # Find all elements matching the tab selector and pick the first visible one
+                tab_locators = page.locator("button:has-text('Image to Image'), span:has-text('Image to Image'), div:has-text('Image to Image')").all()
+                img_to_img_tab = None
+                for loc in tab_locators:
+                    if loc.is_visible():
+                        img_to_img_tab = loc
+                        break
+                
+                if not img_to_img_tab:
+                    img_to_img_tab = page.locator("button:has-text('Image to Image')").first
+                    
                 img_to_img_tab.wait_for(state="visible", timeout=15000)
-                try:
-                    img_to_img_tab.scroll_into_view_if_needed()
-                except Exception:
-                    pass
                 try:
                     img_to_img_tab.click(force=True, timeout=5000)
                 except Exception:
@@ -309,13 +316,19 @@ class EasemateBrowserWorker:
                 self.log_info(f"Warning: Image to Image tab / upload failed: {e}")
         else:
             self.log_info("Switching to Text to Image mode...")
-            text_to_image_tab = page.locator("button:has-text('Text to Image'), span:has-text('Text to Image'), div:has-text('Text to Image')").first
             try:
+                # Find all elements matching the tab selector and pick the first visible one
+                tab_locators = page.locator("button:has-text('Text to Image'), span:has-text('Text to Image'), div:has-text('Text to Image')").all()
+                text_to_image_tab = None
+                for loc in tab_locators:
+                    if loc.is_visible():
+                        text_to_image_tab = loc
+                        break
+                
+                if not text_to_image_tab:
+                    text_to_image_tab = page.locator("button:has-text('Text to Image')").first
+                    
                 text_to_image_tab.wait_for(state="visible", timeout=15000)
-                try:
-                    text_to_image_tab.scroll_into_view_if_needed()
-                except Exception:
-                    pass
                 try:
                     text_to_image_tab.click(force=True, timeout=5000)
                 except Exception:
@@ -640,18 +653,7 @@ class EasemateBrowserWorker:
                 except Exception:
                     pass
                     
-            # Double Fallback: scan page buttons containing SVG download indicators
-            if not download_btn:
-                try:
-                    btns = page.locator("button, a, div.cursor-pointer").all()
-                    for b in btns:
-                        html_content = b.inner_html().lower()
-                        if any(kw in html_content for kw in ["download", "down", "arrow", "svg"]):
-                            if b.is_visible():
-                                download_btn = b
-                                break
-                except Exception:
-                    pass
+            pass
                     
             # If we found the download button and it's visible, break out
             if download_btn and download_btn.is_visible():

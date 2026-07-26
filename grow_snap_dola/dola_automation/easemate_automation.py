@@ -428,6 +428,10 @@ class EasemateAIAutomationWidget(QWidget):
         self.combo_resolution.setEnabled(False) # Locked by default for free generations
         gen_lay.addWidget(self.combo_resolution, 3, 1)
 
+        gen_lay.addWidget(QLabel("Target URL:", self), 4, 0)
+        self.txt_target_url = QLineEdit("https://www.easemate.ai/ai-image-generator", self)
+        gen_lay.addWidget(self.txt_target_url, 4, 1)
+
         h_dl_lay = QHBoxLayout()
         self.lbl_download_dir_title = QLabel("Download Folder:", self)
         h_dl_lay.addWidget(self.lbl_download_dir_title)
@@ -437,11 +441,11 @@ class EasemateAIAutomationWidget(QWidget):
         self.btn_open_dl.clicked.connect(self._open_download_dir)
         h_dl_lay.addWidget(self.btn_dl_dir)
         h_dl_lay.addWidget(self.btn_open_dl)
-        gen_lay.addLayout(h_dl_lay, 3, 1)
+        gen_lay.addLayout(h_dl_lay, 5, 1)
         
         self.lbl_dl_path_show = QLabel(str(Path.home() / 'Documents' / 'easemate_downloads'), self)
         self.lbl_dl_path_show.setWordWrap(True)
-        gen_lay.addWidget(self.lbl_dl_path_show, 4, 0, 1, 2)
+        gen_lay.addWidget(self.lbl_dl_path_show, 6, 0, 1, 2)
         tab_settings_lay.addWidget(gen_params_group)
 
         # Automation Settings Group
@@ -747,6 +751,7 @@ class EasemateAIAutomationWidget(QWidget):
         self.settings.ratio = self.combo_ratio.currentText()
         self.settings.resolution = self.combo_resolution.currentText()
         self.settings.generation_mode = self.combo_gen_mode.currentText()
+        self.settings.target_url = self.txt_target_url.text().strip()
         self.settings.thread_count = 1 # Force sequential execution to avoid concurrent VPN/session conflicts
         self.settings.submit_and_close = self.chk_submit_and_close.isChecked()
 
@@ -1105,6 +1110,7 @@ class EasemateAIAutomationWidget(QWidget):
         self.settings.ratio = self.combo_ratio.currentText()
         self.settings.resolution = self.combo_resolution.currentText()
         self.settings.generation_mode = self.combo_gen_mode.currentText()
+        self.settings.target_url = self.txt_target_url.text().strip()
         self.settings.thread_count = 1
 
         self.runner = EasemateBatchRunner(
