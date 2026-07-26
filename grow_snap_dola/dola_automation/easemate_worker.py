@@ -74,16 +74,32 @@ class EasemateBrowserWorker:
             launch_args = []
             if os.name != 'nt':
                 launch_args.extend(["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
+            
             if not self.settings.headless:
-                launch_args.append("--disable-blink-features=AutomationControlled")
+                launch_args.extend([
+                    "--disable-blink-features=AutomationControlled",
+                    "--start-maximized",
+                    "--disable-save-password-bubble",
+                    "--disable-translate",
+                    "--disable-infobars",
+                    "--disable-notifications",
+                    "--disable-extensions",
+                    "--no-default-browser-check",
+                    "--no-first-run"
+                ])
             
             try:
-                context = p.chromium.launch_persistent_context(
-                    user_data_dir=str(profile_dir),
-                    headless=self.settings.headless,
-                    viewport={"width": 1280, "height": 800},
-                    args=launch_args
-                )
+                context_kwargs = {
+                    "user_data_dir": str(profile_dir),
+                    "headless": self.settings.headless,
+                    "args": launch_args
+                }
+                if self.settings.headless:
+                    context_kwargs["viewport"] = {"width": 1280, "height": 800}
+                else:
+                    context_kwargs["no_viewport"] = True
+                
+                context = p.chromium.launch_persistent_context(**context_kwargs)
                 self._context = context
             except Exception as e:
                 self.log_info(f"Failed to launch persistent context: {e}")
@@ -132,6 +148,15 @@ class EasemateBrowserWorker:
         
         self.log_info("Navigating to easemate.ai...")
         page.goto("https://www.easemate.ai/ai-image-generator", wait_until="domcontentloaded", timeout=loading_timeout_ms)
+        
+        # Force browser to focus on page DOM and dismiss suggestions / info bubbles
+        try:
+            page.locator("body").click()
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(1000)
+            self.log_info("Focused page body and dismissed browser input popups.")
+        except Exception as e:
+            self.log_info(f"Failed to focus body or send escape key: {e}")
         
         # Check auth warning
         try:
@@ -187,37 +212,41 @@ class EasemateBrowserWorker:
                 break
         
         if trigger:
-            self.log_info("Clicking model dropdown trigger...")
-            try:
-                trigger.scroll_into_view_if_needed()
-            except Exception:
-                pass
-            trigger.click()
-            page.wait_for_timeout(1500)
-            
-            model_option = None
-            option_selectors = [
-                f"text='{model}'",
-                f"div:has-text('{model}')",
-                f"span:has-text('{model}')",
-                f"button:has-text('{model}')"
-            ]
-            for o_sel in option_selectors:
-                opt = page.locator(o_sel).first
-                if opt.is_visible():
-                    model_option = opt
-                    break
-                    
-            if model_option:
-                self.log_info(f"Selecting option: {model}")
+            curr_model_text = trigger.inner_text().strip()
+            if curr_model_text == model:
+                self.log_info(f"Model is already set to '{model}'. Skipping selection.")
+            else:
+                self.log_info("Clicking model dropdown trigger...")
                 try:
-                    model_option.scroll_into_view_if_needed()
+                    trigger.scroll_into_view_if_needed()
                 except Exception:
                     pass
-                model_option.click()
+                trigger.click()
                 page.wait_for_timeout(1500)
-            else:
-                self.log_info(f"Model option '{model}' not found in dropdown list.")
+                
+                model_option = None
+                option_selectors = [
+                    f"text='{model}'",
+                    f"div:has-text('{model}')",
+                    f"span:has-text('{model}')",
+                    f"button:has-text('{model}')"
+                ]
+                for o_sel in option_selectors:
+                    opt = page.locator(o_sel).first
+                    if opt.is_visible():
+                        model_option = opt
+                        break
+                        
+                if model_option:
+                    self.log_info(f"Selecting option: {model}")
+                    try:
+                        model_option.scroll_into_view_if_needed()
+                    except Exception:
+                        pass
+                    model_option.click()
+                    page.wait_for_timeout(1500)
+                else:
+                    self.log_info(f"Model option '{model}' not found in dropdown list.")
         else:
             self.log_info("Model dropdown trigger not found or not visible.")
 
@@ -247,6 +276,8 @@ class EasemateBrowserWorker:
         self.log_info(f"Selecting aspect ratio: {aspect_ratio}")
         ratio_btn = None
         ratio_selectors = [
+            f"xpath=//div[contains(., 'Output Aspect Ratios')]/following-sibling::div//*[text()='{aspect_ratio}']",
+            f"xpath=//*[contains(text(), 'Output Aspect Ratios')]/..//*[text()='{aspect_ratio}']",
             f"div:has-text('Output Aspect Ratios') + div text='{aspect_ratio}'",
             f"span:has-text('Output Aspect Ratios') + div text='{aspect_ratio}'",
             f"text='{aspect_ratio}'"
@@ -281,22 +312,27 @@ class EasemateBrowserWorker:
                 res_trigger = loc
                 break
         if res_trigger:
-            try:
-                res_trigger.scroll_into_view_if_needed()
-            except Exception:
-                pass
-            res_trigger.click()
-            page.wait_for_timeout(500)
-            res_option = page.locator(f"text='{resolution_ratio}'").first
-            if res_option.is_visible():
+            curr_res_text = res_trigger.inner_text().strip()
+            if curr_res_text == resolution_ratio:
+                self.log_info(f"Resolution ratio is already set to '{resolution_ratio}'. Skipping selection.")
+            else:
+                self.log_info("Clicking resolution dropdown trigger...")
                 try:
-                    res_option.scroll_into_view_if_needed()
+                    res_trigger.scroll_into_view_if_needed()
                 except Exception:
                     pass
-                res_option.click()
+                res_trigger.click()
                 page.wait_for_timeout(500)
-            else:
-                self.log_info(f"Resolution ratio option '{resolution_ratio}' not visible.")
+                res_option = page.locator(f"text='{resolution_ratio}'").first
+                if res_option.is_visible():
+                    try:
+                        res_option.scroll_into_view_if_needed()
+                    except Exception:
+                        pass
+                    res_option.click()
+                    page.wait_for_timeout(500)
+                else:
+                    self.log_info(f"Resolution ratio option '{resolution_ratio}' not visible.")
         else:
             self.log_info("Resolution ratio trigger not visible.")
 
