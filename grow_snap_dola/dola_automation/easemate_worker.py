@@ -291,7 +291,7 @@ class EasemateBrowserWorker:
                 self.log_info(f"Warning: failed to clear textarea via keyboard: {e}")
                 
             textarea.fill(job.prompt)
-            page.wait_for_timeout(1000)
+            page.wait_for_timeout(3000) # Wait 3 seconds as requested
         else:
             raise Exception("Prompt textarea not visible on page.")
 
@@ -301,33 +301,26 @@ class EasemateBrowserWorker:
         ratio_btn = None
         
         try:
-            candidates = page.locator("div.cursor-pointer, button, div[role='button']").all()
-            for cand in candidates:
-                try:
-                    if cand.is_visible() and cand.inner_text().strip() == aspect_ratio:
-                        ratio_btn = cand
-                        break
-                except Exception:
-                    pass
-        except Exception as e:
-            self.log_info(f"Error listing aspect ratio candidates: {e}")
+            # First try direct container locator
+            container = page.locator("div:has-text('Output Aspect Ratios')").last
+            btn = container.locator(f"div.cursor-pointer:has-text('{aspect_ratio}')").first
+            if btn.is_visible():
+                ratio_btn = btn
+        except Exception:
+            pass
             
         if not ratio_btn:
             try:
-                container = page.locator("div, span, p, h1, h2, h3").filter(has_text="Output Aspect Ratios").last
-                if container.is_visible():
-                    btn = container.locator(f"text='{aspect_ratio}'").first
-                    if btn.is_visible():
-                        ratio_btn = btn
+                btn = page.locator(f"div.cursor-pointer:has-text('{aspect_ratio}')").first
+                if btn.is_visible():
+                    ratio_btn = btn
             except Exception:
                 pass
-                
+
         if not ratio_btn:
             ratio_selectors = [
                 f"xpath=//div[contains(., 'Output Aspect Ratios')]/following-sibling::div//*[text()='{aspect_ratio}']",
                 f"xpath=//*[contains(text(), 'Output Aspect Ratios')]/..//*[text()='{aspect_ratio}']",
-                f"div:has-text('Output Aspect Ratios') + div text='{aspect_ratio}'",
-                f"span:has-text('Output Aspect Ratios') + div text='{aspect_ratio}'",
                 f"text='{aspect_ratio}'"
             ]
             for r_sel in ratio_selectors:
