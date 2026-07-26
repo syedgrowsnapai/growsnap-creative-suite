@@ -680,6 +680,10 @@ class EasemateAIAutomationWidget(QWidget):
         self.settings.headless = self.chk_headless.isChecked()
         self.settings.active_profile_name = "Easemate_Free"
         self.settings.easemate_loading_timeout_sec = self.spin_loading_timeout.value()
+        self.settings.model = self.combo_model.currentText()
+        self.settings.ratio = self.combo_ratio.currentText()
+        self.settings.resolution = self.combo_resolution.currentText()
+        self.settings.thread_count = self.spin_threads.value()
 
         # Save session in database
         session_name = f"Session {time.strftime('%Y-%m-%d %H:%M')}"
@@ -689,14 +693,9 @@ class EasemateAIAutomationWidget(QWidget):
             logger.warning(f"Failed to create database session: {de}")
             self.current_session_id = None
 
-        model = self.combo_model.currentText()
-        ratio = self.combo_ratio.currentText()
-        res = self.combo_resolution.currentText()
-
         # Start QThread BatchRunner
         self.runner = EasemateBatchRunner(
-            self.jobs, self.settings, model, ratio, res, 
-            self.spin_threads.value(), db=self.db, session_id=self.current_session_id
+            self.jobs, self.settings, db=self.db, session_id=self.current_session_id, mode="full"
         )
         self.runner.job_progress.connect(self._on_runner_progress)
         self.runner.job_finished.connect(self._on_runner_finished)
@@ -706,7 +705,7 @@ class EasemateAIAutomationWidget(QWidget):
     def _on_runner_progress(self, index: int, message: str):
         self.txt_log.appendPlainText(message)
 
-    def _on_runner_finished(self, index: int, success: bool):
+    def _on_runner_finished(self, index: int, success: bool, download_path: str, error: str):
         self._refresh_table()
         self._update_stats()
 
