@@ -291,14 +291,27 @@ class EasemateBrowserWorker:
         ratio_btn = None
         
         try:
-            container = page.locator("div, span, p, h1, h2, h3").filter(has_text="Output Aspect Ratios").last
-            if container.is_visible():
-                btn = container.locator(f"text='{aspect_ratio}'").first
-                if btn.is_visible():
-                    ratio_btn = btn
-        except Exception:
-            pass
+            candidates = page.locator("div.cursor-pointer, button, div[role='button']").all()
+            for cand in candidates:
+                try:
+                    if cand.is_visible() and cand.inner_text().strip() == aspect_ratio:
+                        ratio_btn = cand
+                        break
+                except Exception:
+                    pass
+        except Exception as e:
+            self.log_info(f"Error listing aspect ratio candidates: {e}")
             
+        if not ratio_btn:
+            try:
+                container = page.locator("div, span, p, h1, h2, h3").filter(has_text="Output Aspect Ratios").last
+                if container.is_visible():
+                    btn = container.locator(f"text='{aspect_ratio}'").first
+                    if btn.is_visible():
+                        ratio_btn = btn
+            except Exception:
+                pass
+                
         if not ratio_btn:
             ratio_selectors = [
                 f"xpath=//div[contains(., 'Output Aspect Ratios')]/following-sibling::div//*[text()='{aspect_ratio}']",
@@ -383,7 +396,7 @@ class EasemateBrowserWorker:
         return self._wait_and_download(page, job)
 
     def _wait_and_download(self, page: Page, job: PromptJob) -> bool:
-        self.log_info("Polling for generated image download button...")
+        self.log_info("Polling for generated image matching prompt...")
         
         download_btn_selectors = [
             "button:has-text('Recreate') + button",
@@ -395,23 +408,52 @@ class EasemateBrowserWorker:
             "xpath=//a[contains(., 'Download')]"
         ]
         
+        # Clean prompt for matching
+        clean_prompt = job.prompt.strip().lower()
+        short_prompt = clean_prompt[:25]  # matching key chunk
+        
         download_btn = None
         max_polls = 10
         poll_interval = 30000 # 30 seconds
+        
         for attempt in range(max_polls):
             if self._cancelled:
                 self.log_info("Job execution cancelled by user.")
                 return False
                 
-            for sel in download_btn_selectors:
-                try:
-                    btn = page.locator(sel).first
-                    if btn.is_visible():
-                        download_btn = btn
+            # Method A: Try to find img with alt matching prompt, then navigate to download button inside card
+            try:
+                imgs = page.locator("img").all()
+                for img in imgs:
+                    alt = (img.get_attribute("alt") or "").strip().lower()
+                    if alt and (short_prompt in alt or alt in clean_prompt):
+                        # Walk up to the parent card container and search for download button
+                        parent = img
+                        for _ in range(5):
+                            parent = parent.locator("..")
+                            for sel in download_btn_selectors:
+                                btn = parent.locator(sel).first
+                                if btn.is_visible():
+                                    download_btn = btn
+                                    break
+                            if download_btn:
+                                break
+                    if download_btn:
                         break
-                except Exception:
-                    pass
-                    
+            except Exception as e:
+                self.log_info(f"Trace matching prompt images error: {e}")
+                
+            # Method B: Fallback to first visible download button if prompt matching yielded nothing
+            if not download_btn:
+                for sel in download_btn_selectors:
+                    try:
+                        btn = page.locator(sel).first
+                        if btn.is_visible():
+                            download_btn = btn
+                            break
+                    except Exception:
+                        pass
+                        
             if download_btn:
                 self.log_info("Download button detected! Image is ready.")
                 break
