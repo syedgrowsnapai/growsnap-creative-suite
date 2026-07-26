@@ -724,24 +724,7 @@ class EasemateBatchRunner(QThread):
             if not success:
                 lower_err = error_msg.lower()
                 if any(x in lower_err for x in ["limit", "quota", "credit", "point", "login", "log in"]):
-                    curr_profile = thread_settings.active_profile_name or "Easemate_Free"
-                    if "_" in curr_profile:
-                        try:
-                            base, num_str = curr_profile.rsplit("_", 1)
-                            if num_str.isdigit():
-                                next_num = int(num_str) + 1
-                                next_profile = f"{base}_{next_num}"
-                            else:
-                                next_profile = f"{curr_profile}_1"
-                        except Exception:
-                            next_profile = f"{curr_profile}_1"
-                    else:
-                        next_profile = f"{curr_profile}_1"
-                        
-                    logger.info(f"Limit/Login alert hit! Rotating EaseMate profile: {curr_profile} -> {next_profile}")
-                    thread_settings.active_profile_name = next_profile
-                    self.profile_rotated.emit(next_profile)
-                    self.job_progress.emit(job.index, f"Quota/Login alert detected. Auto-rotated to profile: {next_profile}")
+                    self.job_progress.emit(job.index, "Login/Quota warning detected. Retrying with a clean browser session...")
                 
             retries += 1
             if retries < max_retries and not self._stop:
