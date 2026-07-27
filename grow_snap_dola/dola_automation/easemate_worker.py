@@ -130,6 +130,11 @@ class EasemateBrowserWorker:
         mode_label = "headed" if not self.settings.headless else "headless"
         self.log_info(f"Job #{job.index}: Starting Playwright execution in {mode_label} mode.")
         
+        # Clear stale parameters on fresh generation runs to prevent skipping to download stage
+        if mode == "full":
+            job.chat_url = ""
+            job.download_path = ""
+        
         # Determine profile directory path
         profile_name = getattr(self.settings, 'active_profile_name', 'Default')
         profile_dir = Path.home() / 'Documents' / 'easemate_video_automation' / 'profiles' / profile_name
@@ -935,10 +940,12 @@ class EasemateBatchRunner(QThread):
             time.sleep(0.5)
             
         thread_settings = copy.deepcopy(self.settings)
-        if job.chat_url and self.mode != "submit_only":
+        # Only reuse chat_url for download_only if the job status is already SUBMITTED or we are explicitly in download_only mode.
+        # If the job status is PENDING, we must run the full generation from scratch.
+        if self.mode == "download_only" or (job.chat_url and job.status == JobStatus.SUBMITTED and self.mode != "submit_only"):
             worker_mode = "download_only"
         else:
-            worker_mode = "download_only" if self.mode == "download_only" else "full"
+            worker_mode = "full"
         if self.mode == "submit_only":
             thread_settings.submit_and_close = True
 
