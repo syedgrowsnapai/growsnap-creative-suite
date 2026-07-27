@@ -315,16 +315,10 @@ class EasemateBrowserWorker:
         if run_mode == "image":
             self.log_info("Switching to Image to Image mode...")
             try:
-                # Find all elements matching the tab selector and pick the first visible one
-                tab_locators = page.locator("button:has-text('Image to Image'), span:has-text('Image to Image'), div:has-text('Image to Image')").all()
-                img_to_img_tab = None
-                for loc in tab_locators:
-                    if loc.is_visible():
-                        img_to_img_tab = loc
-                        break
-                
-                if not img_to_img_tab:
-                    img_to_img_tab = page.locator("button:has-text('Image to Image')").first
+                # Target exact button text using get_by_role / get_by_text
+                img_to_img_tab = page.get_by_role("button", name="Image to Image", exact=True).first
+                if not img_to_img_tab.is_visible():
+                    img_to_img_tab = page.get_by_text("Image to Image", exact=True).first
                     
                 img_to_img_tab.wait_for(state="visible", timeout=15000)
                 try:
@@ -345,16 +339,10 @@ class EasemateBrowserWorker:
         else:
             self.log_info("Switching to Text to Image mode...")
             try:
-                # Find all elements matching the tab selector and pick the first visible one
-                tab_locators = page.locator("button:has-text('Text to Image'), span:has-text('Text to Image'), div:has-text('Text to Image')").all()
-                text_to_image_tab = None
-                for loc in tab_locators:
-                    if loc.is_visible():
-                        text_to_image_tab = loc
-                        break
-                
-                if not text_to_image_tab:
-                    text_to_image_tab = page.locator("button:has-text('Text to Image')").first
+                # Target exact button text using get_by_role / get_by_text
+                text_to_image_tab = page.get_by_role("button", name="Text to Image", exact=True).first
+                if not text_to_image_tab.is_visible():
+                    text_to_image_tab = page.get_by_text("Text to Image", exact=True).first
                     
                 text_to_image_tab.wait_for(state="visible", timeout=15000)
                 try:
@@ -600,6 +588,7 @@ class EasemateBrowserWorker:
         
         # 1. Wait for "Generating..." progress text to completely disappear from the page
         generating_detected = False
+        consecutive_missing = 0
         max_gen_polls = 60  # 60 * 5 seconds = 5 minutes maximum wait
         
         for gp in range(max_gen_polls):
@@ -614,6 +603,7 @@ class EasemateBrowserWorker:
                     progress_text = (progress_loc.text_content() or "").strip()
                     if progress_text and "generating" in progress_text.lower():
                         generating_detected = True
+                        consecutive_missing = 0  # reset missing count
                         if len(progress_text) > 40:
                             progress_text = progress_text[:37] + "..."
                         self.log_info(f"EaseMate Status: {progress_text}")
@@ -627,13 +617,57 @@ class EasemateBrowserWorker:
                 pass
                 
             # If we haven't seen a generating message yet, wait a brief moment to let it start up
-            if not generating_detected and gp < 3:
-                page.wait_for_timeout(3000)
-                continue
+            if not generating_detected:
+                if gp < 3:
+                    self.log_info("Checking for startup of generation progress...")
+                    page.wait_for_timeout(3000)
+                    continue
+                else:
+                    self.log_info("No generation progress detected on startup. Proceeding to download check.")
+                    break
+            else:
+                # We previously saw "Generating...", but now it is missing.
+                # Increment consecutive missing count to handle React rendering flickers
+                consecutive_missing += 1
+                self.log_info(f"Generation message missing. Verification count: {consecutive_missing}/3...")
                 
-            self.log_info("EaseMate 'Generating...' progress text has disappeared. Generation completed.")
-            break
-            
+                # Check if the download button is actually visible now!
+                download_btn_visible = False
+                try:
+                    clean_prompt = job.prompt.strip()
+                    short_prompt = clean_prompt[:25]
+                    candidates = page.locator(f"p:has-text('{short_prompt}'), div:has-text('{short_prompt}'), span:has-text('{short_prompt}')").all()
+                    for cand in candidates:
+                        if cand.is_visible():
+                            parent = cand
+                            for _ in range(5):
+                                parent = parent.locator("..")
+                                clickables = parent.locator("button, a, div.cursor-pointer, [role='button']").all()
+                                icon_only = []
+                                for c in clickables:
+                                    txt = (c.inner_text() or "").strip().lower()
+                                    if any(kw in txt for kw in ["generate", "video", "recreate", "remix"]):
+                                        continue
+                                    icon_only.append(c)
+                                if icon_only and icon_only[0].is_visible():
+                                    download_btn_visible = True
+                                    break
+                            if download_btn_visible:
+                                break
+                except Exception:
+                    pass
+                    
+                if download_btn_visible:
+                    self.log_info("Download button is visible. Generation completed successfully.")
+                    break
+                elif consecutive_missing >= 3:
+                    self.log_info("Generation progress text was missing for 15 seconds. Proceeding to final download search.")
+                    break
+                else:
+                    # Wait and continue polling
+                    page.wait_for_timeout(5000)
+                    continue
+                    
         # Wait 3 seconds for the React DOM to fully render the completed card buttons
         page.wait_for_timeout(3000)
         
