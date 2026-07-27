@@ -776,6 +776,14 @@ class EasemateAIAutomationWidget(QWidget):
 
     def _on_runner_progress(self, index: int, message: str):
         self.txt_log.appendPlainText(message)
+        # Update progress column in the table widget
+        for row in range(self.table.rowCount()):
+            idx_item = self.table.item(row, 0)
+            if idx_item and idx_item.text() == str(index):
+                status_item = self.table.item(row, 4)
+                if status_item:
+                    status_item.setText(message.upper() if len(message) < 20 else message)
+                break
 
     def _on_runner_profile_rotated(self, next_profile: str):
         self.settings.active_profile_name = next_profile

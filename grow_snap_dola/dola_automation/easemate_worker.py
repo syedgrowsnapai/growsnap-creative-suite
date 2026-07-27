@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Callable, Optional, Set, List
 
 try:
-    from patchright.sync_api import sync_playwright, Page, BrowserContext, Response, Error as PlaywrightError
+    from patchright.sync_api import sync_playwright, Page, BrowserContext, Response, Locator, Error as PlaywrightError
 except ImportError:
     try:
-        from playwright.sync_api import sync_playwright, Page, BrowserContext, Response, Error as PlaywrightError
+        from playwright.sync_api import sync_playwright, Page, BrowserContext, Response, Locator, Error as PlaywrightError
     except ImportError:
         raise ImportError("Neither patchright nor playwright is installed in the python environment.")
 
@@ -583,6 +583,41 @@ class EasemateBrowserWorker:
         page.wait_for_timeout(5000)
         return self._wait_and_download(page, job)
 
+    def _find_download_button_in_card(self, parent_locator) -> Optional[Locator]:
+        try:
+            clickables = parent_locator.locator("button, a, div.cursor-pointer, [role='button']").all()
+            
+            # 1. First pass: explicit download tags check (title, aria-label, class, ID)
+            for c in clickables:
+                title = (c.get_attribute("title") or "").lower()
+                aria = (c.get_attribute("aria-label") or "").lower()
+                cls = (c.get_attribute("class") or "").lower()
+                
+                if "download" in title or "download" in aria or "download" in cls:
+                    if c.is_visible():
+                        return c
+                        
+            # 2. Second pass: search for icon-only tags, strictly excluding standard <a> navigation links
+            for c in clickables:
+                tag = c.evaluate("el => el.tagName").lower()
+                txt = (c.inner_text() or "").strip().lower()
+                
+                # Skip text-heavy actions
+                if any(kw in txt for kw in ["generate", "video", "recreate", "remix"]):
+                    continue
+                    
+                # Skip <a> tags unless they have explicit download attributes or download text
+                if tag == "a":
+                    has_dl_attr = c.get_attribute("download") is not None
+                    if not has_dl_attr:
+                        continue
+                        
+                if c.is_visible():
+                    return c
+        except Exception:
+            pass
+        return None
+
     def _wait_and_download(self, page: Page, job: PromptJob) -> bool:
         self.log_info("Waiting patiently for the image generation to complete...")
         
@@ -642,14 +677,8 @@ class EasemateBrowserWorker:
                             parent = cand
                             for _ in range(5):
                                 parent = parent.locator("..")
-                                clickables = parent.locator("button, a, div.cursor-pointer, [role='button']").all()
-                                icon_only = []
-                                for c in clickables:
-                                    txt = (c.inner_text() or "").strip().lower()
-                                    if any(kw in txt for kw in ["generate", "video", "recreate", "remix"]):
-                                        continue
-                                    icon_only.append(c)
-                                if icon_only and icon_only[0].is_visible():
+                                btn = self._find_download_button_in_card(parent)
+                                if btn:
                                     download_btn_visible = True
                                     break
                             if download_btn_visible:
@@ -684,15 +713,9 @@ class EasemateBrowserWorker:
                     parent = cand
                     for _ in range(5):
                         parent = parent.locator("..")
-                        clickables = parent.locator("button, a, div.cursor-pointer, [role='button']").all()
-                        icon_only = []
-                        for c in clickables:
-                            txt = (c.inner_text() or "").strip().lower()
-                            if any(kw in txt for kw in ["generate", "video", "recreate", "remix"]):
-                                continue
-                            icon_only.append(c)
-                        if icon_only:
-                            download_btn = icon_only[0]
+                        btn = self._find_download_button_in_card(parent)
+                        if btn:
+                            download_btn = btn
                             break
                     if download_btn:
                         break
@@ -709,15 +732,9 @@ class EasemateBrowserWorker:
                         parent = img
                         for _ in range(6):
                             parent = parent.locator("..")
-                            clickables = parent.locator("button, a, div.cursor-pointer, [role='button']").all()
-                            icon_only = []
-                            for c in clickables:
-                                txt = (c.inner_text() or "").strip().lower()
-                                if any(kw in txt for kw in ["generate", "video", "recreate", "remix"]):
-                                    continue
-                                icon_only.append(c)
-                            if icon_only:
-                                download_btn = icon_only[0]
+                            btn = self._find_download_button_in_card(parent)
+                            if btn:
+                                download_btn = btn
                                 break
                         if download_btn:
                             break
@@ -731,15 +748,9 @@ class EasemateBrowserWorker:
                 feed_cards = page.locator("div.border, div.rounded-3xl, div.shadow-sm").all()
                 for card in feed_cards:
                     if card.is_visible():
-                        clickables = card.locator("button, a, div.cursor-pointer").all()
-                        icon_only = []
-                        for c in clickables:
-                            txt = (c.inner_text() or "").strip().lower()
-                            if any(kw in txt for kw in ["generate", "video", "recreate", "remix"]):
-                                continue
-                            icon_only.append(c)
-                        if icon_only:
-                            download_btn = icon_only[0]
+                        btn = self._find_download_button_in_card(card)
+                        if btn:
+                            download_btn = btn
                             break
             except Exception:
                 pass
