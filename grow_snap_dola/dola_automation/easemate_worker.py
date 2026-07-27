@@ -320,17 +320,21 @@ class EasemateBrowserWorker:
         if run_mode == "image":
             self.log_info("Switching to Image to Image mode...")
             try:
-                # Target exact button text using get_by_role / get_by_text
-                img_to_img_tab = page.get_by_role("button", name="Image to Image", exact=True).first
-                if not img_to_img_tab.is_visible():
-                    img_to_img_tab = page.get_by_text("Image to Image", exact=True).first
-                    
-                img_to_img_tab.wait_for(state="visible", timeout=15000)
-                try:
-                    img_to_img_tab.click(force=True, timeout=5000)
-                except Exception:
-                    page.evaluate("document.querySelectorAll('button, span, div').forEach(el => { if (el.innerText && el.innerText.trim() === 'Image to Image') el.click(); })")
-                self.log_info("Successfully switched to Image to Image mode.")
+                page.wait_for_selector("button:has-text('Image to Image'), span:has-text('Image to Image'), div:has-text('Image to Image')", state="visible", timeout=15000)
+                clicked = page.evaluate("""() => {
+                    const el = Array.from(document.querySelectorAll('button, span, div')).find(e => 
+                        e.innerText && e.innerText.trim() === 'Image to Image' && e.offsetWidth > 0 && e.offsetHeight > 0
+                    );
+                    if (el) {
+                        el.click();
+                        return true;
+                    }
+                    return false;
+                }""")
+                if clicked:
+                    self.log_info("Successfully clicked Image to Image tab.")
+                else:
+                    self.log_info("Warning: Image to Image tab not found via JS evaluation.")
                 page.wait_for_timeout(1500)
                 
                 # Upload the reference image
@@ -344,17 +348,21 @@ class EasemateBrowserWorker:
         else:
             self.log_info("Switching to Text to Image mode...")
             try:
-                # Target exact button text using get_by_role / get_by_text
-                text_to_image_tab = page.get_by_role("button", name="Text to Image", exact=True).first
-                if not text_to_image_tab.is_visible():
-                    text_to_image_tab = page.get_by_text("Text to Image", exact=True).first
-                    
-                text_to_image_tab.wait_for(state="visible", timeout=15000)
-                try:
-                    text_to_image_tab.click(force=True, timeout=5000)
-                except Exception:
-                    page.evaluate("document.querySelectorAll('button, span, div').forEach(el => { if (el.innerText && el.innerText.trim() === 'Text to Image') el.click(); })")
-                self.log_info("Successfully switched to Text to Image mode.")
+                page.wait_for_selector("button:has-text('Text to Image'), span:has-text('Text to Image'), div:has-text('Text to Image')", state="visible", timeout=15000)
+                clicked = page.evaluate("""() => {
+                    const el = Array.from(document.querySelectorAll('button, span, div')).find(e => 
+                        e.innerText && e.innerText.trim() === 'Text to Image' && e.offsetWidth > 0 && e.offsetHeight > 0
+                    );
+                    if (el) {
+                        el.click();
+                        return true;
+                    }
+                    return false;
+                }""")
+                if clicked:
+                    self.log_info("Successfully clicked Text to Image tab.")
+                else:
+                    self.log_info("Warning: Text to Image tab not found via JS evaluation.")
                 page.wait_for_timeout(1000)
             except Exception as e:
                 self.log_info(f"Warning: Text to Image tab not visible or failed to load: {e}")
@@ -597,7 +605,7 @@ class EasemateBrowserWorker:
                 parent = gen_video_lbl
                 for _ in range(3):
                     parent = parent.locator("..")
-                    cls = (parent.get_attribute("class") or "").lower()
+                    cls = parent.evaluate("el => el.className || ''").lower()
                     if "flex" in cls:
                         children = parent.locator("xpath=./div").all()
                         if len(children) >= 3:
@@ -622,9 +630,9 @@ class EasemateBrowserWorker:
             # 3. Third Strategy: Scan all clickables in the card for explicit download markers
             clickables = parent_locator.locator("button, a, div.cursor-pointer, [role='button']").all()
             for c in clickables:
-                title = (c.get_attribute("title") or "").lower()
-                aria = (c.get_attribute("aria-label") or "").lower()
-                cls = (c.get_attribute("class") or "").lower()
+                title = c.evaluate("el => el.getAttribute('title') || ''").lower()
+                aria = c.evaluate("el => el.getAttribute('aria-label') || ''").lower()
+                cls = c.evaluate("el => el.className || ''").lower()
                 
                 if "download" in title or "download" in aria or "download" in cls:
                     if c.is_visible():
@@ -639,7 +647,7 @@ class EasemateBrowserWorker:
                 if any(kw in txt for kw in ["generate", "video", "recreate", "remix"]):
                     continue
                 if tag == "a":
-                    has_dl_attr = c.get_attribute("download") is not None
+                    has_dl_attr = c.evaluate("el => el.hasAttribute('download')")
                     if not has_dl_attr:
                         continue
                 if c.is_visible():
