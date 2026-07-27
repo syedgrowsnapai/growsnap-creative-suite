@@ -601,17 +601,19 @@ class EasemateBrowserWorker:
             # 1. Primary Strategy: Locate the actions flex container and pick the 3rd child (Download)
             # The actions container wraps "Generate Video" and "Recreate" text buttons.
             gen_video_lbl = parent_locator.locator("*:has-text('Generate Video'), *:has-text('Recreate')").first
-            if gen_video_lbl.is_visible():
+            if gen_video_lbl.is_visible(timeout=500):
                 parent = gen_video_lbl
                 for _ in range(3):
                     parent = parent.locator("..")
-                    cls = parent.evaluate("el => el.className || ''").lower()
-                    if "flex" in cls:
+                    is_actions_row = parent.evaluate("""el => {
+                        const cls = (el.className || '').toLowerCase();
+                        return cls.includes('flex') && el.children.length >= 3;
+                    }""")
+                    if is_actions_row:
                         children = parent.locator("xpath=./div").all()
                         if len(children) >= 3:
-                            # 3rd child is the download button (index 2)
                             dl_btn = children[2]
-                            if dl_btn.is_visible():
+                            if dl_btn.is_visible(timeout=500):
                                 self.log_info("Successfully matched download icon container by actions layout (3rd child).")
                                 return dl_btn
 
@@ -619,40 +621,51 @@ class EasemateBrowserWorker:
             # where the 3rd child contains an SVG that is not a delete/trash icon.
             row_candidates = parent_locator.locator("div.flex-row, div.flex").all()
             for row in row_candidates:
-                if row.is_visible():
-                    children = row.locator("xpath=./div").all()
-                    if len(children) >= 3:
-                        html = children[2].evaluate("el => el.outerHTML").lower()
-                        if "svg" in html and "trash" not in html and "delete" not in html:
+                if row.is_visible(timeout=500):
+                    matched = row.evaluate("""el => {
+                        if (el.children.length >= 3) {
+                            const html = el.children[2].outerHTML.toLowerCase();
+                            return html.includes('svg') && !html.includes('trash') && !html.includes('delete');
+                        }
+                        return false;
+                    }""")
+                    if matched:
+                        children = row.locator("xpath=./div").all()
+                        if len(children) >= 3:
                             self.log_info("Successfully matched download icon container by flex child SVG content.")
                             return children[2]
 
             # 3. Third Strategy: Scan all clickables in the card for explicit download markers
             clickables = parent_locator.locator("button, a, div.cursor-pointer, [role='button']").all()
             for c in clickables:
-                title = c.evaluate("el => el.getAttribute('title') || ''").lower()
-                aria = c.evaluate("el => el.getAttribute('aria-label') || ''").lower()
-                cls = c.evaluate("el => el.className || ''").lower()
-                
-                if "download" in title or "download" in aria or "download" in cls:
-                    if c.is_visible():
+                if c.is_visible(timeout=500):
+                    is_dl = c.evaluate("""el => {
+                        const title = (el.getAttribute('title') || '').toLowerCase();
+                        const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                        const cls = (el.className || '').toLowerCase();
+                        return title.includes('download') || aria.includes('download') || cls.includes('download');
+                    }""")
+                    if is_dl:
                         self.log_info("Successfully matched download button by attributes.")
                         return c
                         
             # 4. Final Fallback: Select the first icon-only button excluding navigation links
             for c in clickables:
-                tag = c.evaluate("el => el.tagName").lower()
-                txt = (c.inner_text() or "").strip().lower()
-                
-                if any(kw in txt for kw in ["generate", "video", "recreate", "remix"]):
-                    continue
-                if tag == "a":
-                    has_dl_attr = c.evaluate("el => el.hasAttribute('download')")
-                    if not has_dl_attr:
-                        continue
-                if c.is_visible():
-                    self.log_info("Successfully matched download button by first icon-only fallback.")
-                    return c
+                if c.is_visible(timeout=500):
+                    is_fallback = c.evaluate("""el => {
+                        const tag = el.tagName.toLowerCase();
+                        const txt = (el.innerText || '').trim().toLowerCase();
+                        if (txt.includes('generate') || txt.includes('video') || txt.includes('recreate') || txt.includes('remix')) {
+                            return false;
+                        }
+                        if (tag === 'a') {
+                            return el.hasAttribute('download');
+                        }
+                        return true;
+                    }""")
+                    if is_fallback:
+                        self.log_info("Successfully matched download button by first icon-only fallback.")
+                        return c
         except Exception as e:
             self.log_info(f"Warning in _find_download_button_in_card helper: {e}")
         return None
@@ -804,8 +817,9 @@ class EasemateBrowserWorker:
         success_download = False
         if download_btn:
             try:
+                # Force click to bypass conflicting Tailwind visibility tags (e.g. invisible vs !visible)
                 with page.expect_download(timeout=15000) as download_info:
-                    download_btn.click()
+                    download_btn.click(force=True)
                 download = download_info.value
                 download.save_as(str(dest_path))
                 success_download = True
@@ -813,18 +827,18 @@ class EasemateBrowserWorker:
                 self.log_info(f"Standard download trigger failed or timed out: {dl_err}. Trying direct image extraction fallback...")
 
         if not success_download:
-            # Fallback: Extract image URL and download directly via page request context
+            # Fallback: Extract image URL and download directly via page request context or JS blob downloader
             try:
                 img_src = None
                 candidates = page.locator(f"p:has-text('{short_prompt}'), div:has-text('{short_prompt}'), span:has-text('{short_prompt}')").all()
                 for cand in candidates:
-                    if cand.is_visible():
+                    if cand.is_visible(timeout=500):
                         parent = cand
                         for _ in range(5):
                             parent = parent.locator("..")
                             img_el = parent.locator("img").first
-                            if img_el.is_visible():
-                                img_src = img_el.get_attribute("src")
+                            if img_el.is_visible(timeout=500):
+                                img_src = img_el.evaluate("el => el.getAttribute('src') || ''")
                                 break
                         if img_src:
                             break
@@ -832,19 +846,41 @@ class EasemateBrowserWorker:
                 # Fallback: first visible img in case parent walking failed
                 if not img_src:
                     first_img = page.locator("img").first
-                    if first_img.is_visible():
-                        img_src = first_img.get_attribute("src")
+                    if first_img.is_visible(timeout=500):
+                        img_src = first_img.evaluate("el => el.getAttribute('src') || ''")
                         
                 if img_src:
                     self.log_info(f"Direct image source URL found: {img_src}. Downloading image bytes...")
-                    response = page.request.get(img_src, timeout=30000)
-                    if response.ok:
-                        with open(dest_path, "wb") as f:
-                            f.write(response.body())
-                        self.log_info(f"Successfully saved image bytes directly to: {dest_path}")
-                        success_download = True
+                    if img_src.startswith("blob:"):
+                        self.log_info("Downloading blob URL via browser-side JS fetch...")
+                        base64_data = page.evaluate("""async (url) => {
+                            const response = await fetch(url);
+                            const blob = await response.blob();
+                            return new Promise((resolve, reject) => {
+                                const reader = new FileReader();
+                                reader.onloadend = () => resolve(reader.result);
+                                reader.onerror = reject;
+                                reader.readAsDataURL(blob);
+                            });
+                        }""", img_src)
+                        
+                        if "," in base64_data:
+                            header, payload = base64_data.split(",", 1)
+                            import base64
+                            img_bytes = base64.b64decode(payload)
+                            with open(dest_path, "wb") as f:
+                                f.write(img_bytes)
+                            self.log_info(f"Successfully saved base64 blob image to: {dest_path}")
+                            success_download = True
                     else:
-                        self.log_info(f"Failed to fetch image bytes: HTTP status {response.status}")
+                        response = page.request.get(img_src, timeout=30000)
+                        if response.ok:
+                            with open(dest_path, "wb") as f:
+                                f.write(response.body())
+                            self.log_info(f"Successfully saved image bytes directly to: {dest_path}")
+                            success_download = True
+                        else:
+                            self.log_info(f"Failed to fetch image bytes: HTTP status {response.status}")
             except Exception as extract_err:
                 self.log_info(f"Direct image extraction failed: {extract_err}")
                 
