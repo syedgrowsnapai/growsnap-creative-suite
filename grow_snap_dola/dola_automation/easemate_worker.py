@@ -585,9 +585,37 @@ class EasemateBrowserWorker:
 
     def _find_download_button_in_card(self, parent_locator) -> Optional[Locator]:
         try:
+            # 1. Primary Strategy: Locate the actions flex container and pick the 3rd child (Download)
+            # The actions container wraps "Generate Video" and "Recreate" text buttons.
+            gen_video_lbl = parent_locator.locator("*:has-text('Generate Video'), *:has-text('Recreate')").first
+            if gen_video_lbl.is_visible():
+                parent = gen_video_lbl
+                for _ in range(3):
+                    parent = parent.locator("..")
+                    cls = (parent.get_attribute("class") or "").lower()
+                    if "flex" in cls:
+                        children = parent.locator("xpath=./div").all()
+                        if len(children) >= 3:
+                            # 3rd child is the download button (index 2)
+                            dl_btn = children[2]
+                            if dl_btn.is_visible():
+                                self.log_info("Successfully matched download icon container by actions layout (3rd child).")
+                                return dl_btn
+
+            # 2. Secondary Strategy: Find any visible flex-row container inside the card with at least 3 children
+            # where the 3rd child contains an SVG that is not a delete/trash icon.
+            row_candidates = parent_locator.locator("div.flex-row, div.flex").all()
+            for row in row_candidates:
+                if row.is_visible():
+                    children = row.locator("xpath=./div").all()
+                    if len(children) >= 3:
+                        html = children[2].evaluate("el => el.outerHTML").lower()
+                        if "svg" in html and "trash" not in html and "delete" not in html:
+                            self.log_info("Successfully matched download icon container by flex child SVG content.")
+                            return children[2]
+
+            # 3. Third Strategy: Scan all clickables in the card for explicit download markers
             clickables = parent_locator.locator("button, a, div.cursor-pointer, [role='button']").all()
-            
-            # 1. First pass: explicit download tags check (title, aria-label, class, ID)
             for c in clickables:
                 title = (c.get_attribute("title") or "").lower()
                 aria = (c.get_attribute("aria-label") or "").lower()
@@ -595,27 +623,25 @@ class EasemateBrowserWorker:
                 
                 if "download" in title or "download" in aria or "download" in cls:
                     if c.is_visible():
+                        self.log_info("Successfully matched download button by attributes.")
                         return c
                         
-            # 2. Second pass: search for icon-only tags, strictly excluding standard <a> navigation links
+            # 4. Final Fallback: Select the first icon-only button excluding navigation links
             for c in clickables:
                 tag = c.evaluate("el => el.tagName").lower()
                 txt = (c.inner_text() or "").strip().lower()
                 
-                # Skip text-heavy actions
                 if any(kw in txt for kw in ["generate", "video", "recreate", "remix"]):
                     continue
-                    
-                # Skip <a> tags unless they have explicit download attributes or download text
                 if tag == "a":
                     has_dl_attr = c.get_attribute("download") is not None
                     if not has_dl_attr:
                         continue
-                        
                 if c.is_visible():
+                    self.log_info("Successfully matched download button by first icon-only fallback.")
                     return c
-        except Exception:
-            pass
+        except Exception as e:
+            self.log_info(f"Warning in _find_download_button_in_card helper: {e}")
         return None
 
     def _wait_and_download(self, page: Page, job: PromptJob) -> bool:
@@ -756,17 +782,62 @@ class EasemateBrowserWorker:
                 pass
                 
         if not download_btn:
-            raise Exception("Failed to locate the download button for the generated image.")
+            self.log_info("Warning: Could not locate the download icon button. Proceeding to direct image source URL extraction fallback...")
             
         self.log_info("Initiating high-resolution image download...")
         safe_name = "".join(c for c in job.video_title if c.isalnum() or c in (' ', '-', '_')).strip()
         dest_path = self.download_dir / f"{safe_name}.png"
         
-        with page.expect_download() as download_info:
-            download_btn.click()
-        download = download_info.value
-        download.save_as(str(dest_path))
-        
+        success_download = False
+        if download_btn:
+            try:
+                with page.expect_download(timeout=15000) as download_info:
+                    download_btn.click()
+                download = download_info.value
+                download.save_as(str(dest_path))
+                success_download = True
+            except Exception as dl_err:
+                self.log_info(f"Standard download trigger failed or timed out: {dl_err}. Trying direct image extraction fallback...")
+
+        if not success_download:
+            # Fallback: Extract image URL and download directly via page request context
+            try:
+                img_src = None
+                candidates = page.locator(f"p:has-text('{short_prompt}'), div:has-text('{short_prompt}'), span:has-text('{short_prompt}')").all()
+                for cand in candidates:
+                    if cand.is_visible():
+                        parent = cand
+                        for _ in range(5):
+                            parent = parent.locator("..")
+                            img_el = parent.locator("img").first
+                            if img_el.is_visible():
+                                img_src = img_el.get_attribute("src")
+                                break
+                        if img_src:
+                            break
+                            
+                # Fallback: first visible img in case parent walking failed
+                if not img_src:
+                    first_img = page.locator("img").first
+                    if first_img.is_visible():
+                        img_src = first_img.get_attribute("src")
+                        
+                if img_src:
+                    self.log_info(f"Direct image source URL found: {img_src}. Downloading image bytes...")
+                    response = page.request.get(img_src, timeout=30000)
+                    if response.ok:
+                        with open(dest_path, "wb") as f:
+                            f.write(response.body())
+                        self.log_info(f"Successfully saved image bytes directly to: {dest_path}")
+                        success_download = True
+                    else:
+                        self.log_info(f"Failed to fetch image bytes: HTTP status {response.status}")
+            except Exception as extract_err:
+                self.log_info(f"Direct image extraction failed: {extract_err}")
+                
+        if not success_download:
+            raise Exception("Failed to download or save the generated image file.")
+            
         job.download_path = str(dest_path)
         self.log_info(f"Successfully downloaded image: {dest_path.name}")
         return True
