@@ -136,6 +136,15 @@ class EasemateBrowserWorker:
         profile_dir.mkdir(parents=True, exist_ok=True)
         self.log_info(f"Using persistent browser profile: {profile_name} at {profile_dir}")
                 
+        # Safely remove any stale Chrome lock files from previous crashes to prevent Playwright hangs
+        for lock_file in ["SingletonLock", "lockfile", "lock"]:
+            lock_path = profile_dir / lock_file
+            try:
+                if lock_path.is_symlink() or lock_path.exists():
+                    lock_path.unlink()
+            except Exception:
+                pass
+
         session_path = self._get_job_session_path(job.index)
         success = False
         
@@ -144,6 +153,23 @@ class EasemateBrowserWorker:
             self.log_info("Pre-launch task started: Connecting to a fresh NordVPN IP region...")
             try:
                 VPNRotator.rotate_vpn(self.log_info)
+                
+                # Wait for the network connection to stabilize
+                self.log_info("Waiting for VPN network interface to stabilize and allocate IP...")
+                import urllib.request
+                import time
+                stable = False
+                for _ in range(10): # Max 20 seconds
+                    try:
+                        urllib.request.urlopen("https://www.easemate.ai/", timeout=3)
+                        stable = True
+                        break
+                    except Exception:
+                        time.sleep(2)
+                if stable:
+                    self.log_info("VPN network interface is stable and online.")
+                else:
+                    self.log_info("Warning: VPN network interface is slow/offline, continuing anyway...")
             except Exception as e:
                 self.log_info(f"Warning: Failed to rotate NordVPN connection on startup: {e}")
                 
@@ -207,7 +233,9 @@ class EasemateBrowserWorker:
         # Load timeout settings
         loading_timeout_sec = getattr(self.settings, 'easemate_loading_timeout_sec', 300)
         loading_timeout_ms = loading_timeout_sec * 1000
-        page.set_default_timeout(loading_timeout_ms)
+        
+        # Use a standard 30s default timeout for general selector operations, preventing thread freezes
+        page.set_default_timeout(30000)
         
         # First load the homepage to clear cookies and storage natively
         self.log_info("Navigating to easemate.ai homepage to cleanse storage...")
