@@ -10,6 +10,24 @@ import time
 import shutil
 
 def get_ffmpeg_path() -> Path:
+    # 1. Try imageio_ffmpeg (provides full official static FFmpeg binaries on all OS platforms)
+    try:
+        import imageio_ffmpeg
+        p = Path(imageio_ffmpeg.get_ffmpeg_exe())
+        if p.exists() and p.is_file():
+            return p
+    except Exception:
+        # If imageio-ffmpeg is not installed, attempt on-demand pip install
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "install", "imageio-ffmpeg"], 
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=25)
+            import imageio_ffmpeg
+            p = Path(imageio_ffmpeg.get_ffmpeg_exe())
+            if p.exists() and p.is_file():
+                return p
+        except Exception:
+            pass
+
     possible_paths = []
     
     # Check if frozen by PyInstaller
@@ -36,10 +54,10 @@ def get_ffmpeg_path() -> Path:
     
     # Common Windows installation directories
     if os.name == 'nt':
-        possible_paths.append(Path("C:/Program Files/Genspark Speakly/resources/ffmpeg/ffmpeg.exe"))
         possible_paths.append(Path("C:/ffmpeg/bin/ffmpeg.exe"))
         possible_paths.append(Path("C:/ffmpeg/ffmpeg.exe"))
         if "LOCALAPPDATA" in os.environ:
+            possible_paths.append(Path(os.environ["LOCALAPPDATA"]) / "GrowSnap" / "ffmpeg" / "ffmpeg.exe")
             possible_paths.append(Path(os.environ["LOCALAPPDATA"]) / "Microsoft" / "WinGet" / "Links" / "ffmpeg.exe")
         if "USERPROFILE" in os.environ:
             possible_paths.append(Path(os.environ["USERPROFILE"]) / "scoop" / "shims" / "ffmpeg.exe")
@@ -315,6 +333,8 @@ class ConverterWorker(QThread):
             
         self.log.emit(f"Starting conversion of {total} videos using method: {self.method}")
         completed = 0
+        succeeded = 0
+        failed = 0
         
         for in_path in self.input_paths:
             if self._stop:
@@ -329,10 +349,13 @@ class ConverterWorker(QThread):
                     self.crop_pixels
                 )
                 if success:
+                    succeeded += 1
                     self.log.emit(f"Success: {in_path.name}")
                 else:
+                    failed += 1
                     self.log.emit(f"Failed: {in_path.name}")
             except Exception as e:
+                failed += 1
                 self.log.emit(f"Error processing {in_path.name}: {e}")
                 
             completed += 1
@@ -341,7 +364,10 @@ class ConverterWorker(QThread):
         if self._stop:
             self.log.emit("Conversion stopped by user.")
         else:
-            self.log.emit("Batch conversion finished!")
+            if failed == 0:
+                self.log.emit(f"Batch conversion finished successfully! ({succeeded}/{total} videos processed)")
+            else:
+                self.log.emit(f"Batch conversion finished with warnings: {succeeded} succeeded, {failed} failed.")
         self.finished_batch.emit()
 
 class MergerWorker(QThread):
