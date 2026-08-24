@@ -1480,12 +1480,15 @@ class MainWindow(QMainWindow):
         v_btn_layout.addStretch()
         merger_grid.addLayout(v_btn_layout, 0, 3, 4, 1)
         
-        self.btn_merge_output = QPushButton("Select Output File", self)
-        self.btn_merge_output.clicked.connect(self._pick_merge_output)
+        self.btn_merge_output = QPushButton("Select Output Folder", self)
+        self.btn_merge_output.clicked.connect(self._pick_merge_output_folder)
         merger_grid.addWidget(self.btn_merge_output, 4, 0)
-        self.lbl_merge_output = QLabel("No output selected", self)
+        self.lbl_merge_output = QLabel("Auto: Input Videos Folder", self)
         self.lbl_merge_output.setWordWrap(True)
-        merger_grid.addWidget(self.lbl_merge_output, 4, 1, 1, 3)
+        merger_grid.addWidget(self.lbl_merge_output, 4, 1, 1, 2)
+        self.btn_open_merge_output = QPushButton("📂 Open", self)
+        self.btn_open_merge_output.clicked.connect(lambda: self._open_folder_of_path(self.lbl_merge_output.text()))
+        merger_grid.addWidget(self.btn_open_merge_output, 4, 3)
         
         merger_layout.addWidget(merger_settings_group)
         
@@ -3443,6 +3446,13 @@ class MainWindow(QMainWindow):
         if files:
             for f in files:
                 self.list_merge_files.addItem(f)
+            # Auto-set output destination to the folder of the added videos if not customized
+            if self.lbl_merge_output.text() in ("No output selected", "Auto: Input Videos Folder", ""):
+                try:
+                    first_folder = str(Path(files[0]).parent.resolve())
+                    self.lbl_merge_output.setText(first_folder)
+                except Exception:
+                    pass
                 
     def _remove_merge_file(self):
         selected = self.list_merge_files.selectedItems()
@@ -3467,27 +3477,40 @@ class MainWindow(QMainWindow):
             self.list_merge_files.insertItem(row + 1, item)
             self.list_merge_files.setCurrentRow(row + 1)
             
-    def _pick_merge_output(self):
-        f, _ = QFileDialog.getSaveFileName(
-            self, "Select Merged Output Video Path", str(Path.home() / "Downloads"), "Video Files (*.mp4)"
+    def _pick_merge_output_folder(self):
+        current_text = self.lbl_merge_output.text().strip()
+        initial_dir = current_text if (current_text and Path(current_text).is_dir()) else str(Path.home() / "Downloads")
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Output Destination Folder for Merged Video", initial_dir
         )
-        if f:
-            if not f.endswith(".mp4"):
-                f += ".mp4"
-            self.lbl_merge_output.setText(f)
+        if folder:
+            self.lbl_merge_output.setText(folder)
             
     def _start_merging(self):
+        from datetime import datetime
         count = self.list_merge_files.count()
         if count < 2:
             QMessageBox.warning(self, "Invalid Request", "Please add at least two videos to merge.")
             return
             
-        out_path = self.lbl_merge_output.text()
-        if out_path == "No output selected":
-            QMessageBox.warning(self, "Invalid Request", "Please select an output file destination.")
-            return
-            
         input_paths = [self.list_merge_files.item(i).text() for i in range(count)]
+        out_target = self.lbl_merge_output.text().strip()
+        
+        # Determine output folder and timestamped video filename
+        if out_target in ("No output selected", "Auto: Input Videos Folder", ""):
+            output_dir = Path(input_paths[0]).parent
+        else:
+            p = Path(out_target)
+            if p.is_dir():
+                output_dir = p
+            elif p.parent.is_dir():
+                output_dir = p.parent
+            else:
+                output_dir = Path(input_paths[0]).parent
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        final_out_path = str(output_dir / f"merged_video_{timestamp}.mp4")
+        self._last_merged_file = final_out_path
         
         self.btn_merge_start.setEnabled(False)
         self.merger_progress.setValue(0)
@@ -3496,7 +3519,7 @@ class MainWindow(QMainWindow):
         # Report video merger operation to telemetry
         self.telemetry.report_merger_job(files_count=len(input_paths))
         
-        self.merger_worker = MergerWorker(input_paths, out_path)
+        self.merger_worker = MergerWorker(input_paths, final_out_path)
         self.merger_worker.log.connect(self.merger_log.appendPlainText)
         self.merger_worker.progress.connect(self.merger_progress.setValue)
         self.merger_worker.finished.connect(self._on_merge_finished)
@@ -3507,7 +3530,8 @@ class MainWindow(QMainWindow):
         if success:
             self.merger_progress.setValue(100)
             self._send_notification("Video Merger Complete", "Merge completed successfully.")
-            QMessageBox.information(self, "Success", f"Merge Completed!\nVideo saved to:\n{self.lbl_merge_output.text()}")
+            saved_to = getattr(self, '_last_merged_file', self.lbl_merge_output.text())
+            QMessageBox.information(self, "Success", f"Merge Completed!\nVideo saved to:\n{saved_to}")
         else:
             QMessageBox.critical(self, "Failed", f"Merge failed: {msg}")
 
