@@ -6,6 +6,9 @@ from PyQt6.QtCore import QThread, pyqtSignal
 import concurrent.futures
 from typing import List, Tuple
 
+import time
+import shutil
+
 def get_ffmpeg_path() -> Path:
     possible_paths = []
     
@@ -26,16 +29,36 @@ def get_ffmpeg_path() -> Path:
     this_dir = Path(__file__).parent.resolve()
     possible_paths.append(this_dir / 'resources' / 'ffmpeg.exe')
     possible_paths.append(this_dir / 'resources' / 'ffmpeg')
+    possible_paths.append(this_dir.parent / 'resources' / 'ffmpeg.exe')
+    possible_paths.append(this_dir.parent / 'resources' / 'ffmpeg')
+    possible_paths.append(this_dir.parent.parent / 'resources' / 'ffmpeg.exe')
+    possible_paths.append(this_dir.parent.parent / 'bin' / 'ffmpeg.exe')
+    
+    # Common Windows installation directories
+    if os.name == 'nt':
+        possible_paths.append(Path("C:/Program Files/Genspark Speakly/resources/ffmpeg/ffmpeg.exe"))
+        possible_paths.append(Path("C:/ffmpeg/bin/ffmpeg.exe"))
+        possible_paths.append(Path("C:/ffmpeg/ffmpeg.exe"))
+        if "LOCALAPPDATA" in os.environ:
+            possible_paths.append(Path(os.environ["LOCALAPPDATA"]) / "Microsoft" / "WinGet" / "Links" / "ffmpeg.exe")
+        if "USERPROFILE" in os.environ:
+            possible_paths.append(Path(os.environ["USERPROFILE"]) / "scoop" / "shims" / "ffmpeg.exe")
+        if "ProgramFiles" in os.environ:
+            possible_paths.append(Path(os.environ["ProgramFiles"]) / "ffmpeg" / "bin" / "ffmpeg.exe")
     
     # Check standard PATH
     path_env = os.environ.get('PATH', '')
     for p in path_env.split(os.pathsep):
-        possible_paths.append(Path(p) / 'ffmpeg.exe')
-        possible_paths.append(Path(p) / 'ffmpeg')
+        if p.strip():
+            possible_paths.append(Path(p) / 'ffmpeg.exe')
+            possible_paths.append(Path(p) / 'ffmpeg')
         
     for p in possible_paths:
-        if p.exists() and p.is_file():
-            return p
+        try:
+            if p.exists() and p.is_file():
+                return p
+        except Exception:
+            continue
             
     # Fallback default name
     return Path('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
@@ -93,7 +116,7 @@ def process_video_watermark(input_path: Path, method: str, output_path: Path,
                             crop_pixels: int = 80) -> bool:
     """
     Renders watermarks invisible by either:
-      1. Blurring using FFmpeg's delogo filter.
+      1. Blurring using FFmpeg's delogo inpainting filter.
       2. Cropping pixels from the bottom of the frame.
     """
     ffmpeg_exe = get_ffmpeg_path()
@@ -109,17 +132,17 @@ def process_video_watermark(input_path: Path, method: str, output_path: Path,
     w = max(1, min(width - x - 2, int(orig_w * scale_x)))
     h = max(1, min(height - y - 2, int(orig_h * scale_y)))
     
-    # Force even numbers for crop/overlay filter compatibility
+    # Force even numbers for filter compatibility
     x = (x // 2) * 2
     y = (y // 2) * 2
     w = (w // 2) * 2
     h = (h // 2) * 2
     
-    # Clip coordinates to boundaries
-    x = max(0, min(width - 4, x))
-    y = max(0, min(height - 4, y))
-    w = max(4, min(width - x, w))
-    h = max(4, min(height - y, h))
+    # Clip coordinates strictly within frame boundaries for delogo filter
+    x = max(1, min(width - 6, x))
+    y = max(1, min(height - 6, y))
+    w = max(4, min(width - x - 1, w))
+    h = max(4, min(height - y - 1, h))
 
     temp_output = output_path.parent / f"temp_{output_path.name}"
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -131,6 +154,8 @@ def process_video_watermark(input_path: Path, method: str, output_path: Path,
             str(ffmpeg_exe), '-y',
             '-i', str(input_path),
             '-vf', filter_str,
+            '-map', '0:v',
+            '-map', '0:a?',
             '-c:v', 'libx264',
             '-preset', 'fast',
             '-crf', '17',
@@ -144,6 +169,8 @@ def process_video_watermark(input_path: Path, method: str, output_path: Path,
             str(ffmpeg_exe), '-y',
             '-i', str(input_path),
             '-vf', filter_str,
+            '-map', '0:v',
+            '-map', '0:a?',
             '-c:v', 'libx264',
             '-preset', 'fast',
             '-crf', '17',
@@ -154,6 +181,8 @@ def process_video_watermark(input_path: Path, method: str, output_path: Path,
         cmd = [
             str(ffmpeg_exe), '-y',
             '-i', str(input_path),
+            '-map', '0:v',
+            '-map', '0:a?',
             '-c:v', 'libx264',
             '-preset', 'fast',
             '-crf', '17',
@@ -168,26 +197,48 @@ def process_video_watermark(input_path: Path, method: str, output_path: Path,
     try:
         process = subprocess.run(
             cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=creationflags,
-            check=True
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            creationflags=creationflags
         )
+        if process.returncode != 0:
+            print(f"[FFmpeg Error] {process.stderr}")
+            if temp_output.exists():
+                try:
+                    temp_output.unlink()
+                except Exception:
+                    pass
+            return False
+            
         if temp_output.exists():
-            if output_path.exists():
-                output_path.unlink()
-            temp_output.replace(output_path)
-            return True
-        return False
-    except subprocess.CalledProcessError as e:
-        print(f"FFmpeg process error: {e.stderr}")
-        if temp_output.exists():
-            temp_output.unlink()
+            # Handle Windows file locks with retry loop
+            for attempt in range(6):
+                try:
+                    if output_path.exists():
+                        output_path.unlink()
+                    temp_output.replace(output_path)
+                    return True
+                except PermissionError:
+                    time.sleep(0.2)
+                except Exception as ex:
+                    print(f"File replace attempt {attempt+1} failed: {ex}")
+                    time.sleep(0.2)
+            if temp_output.exists():
+                try:
+                    shutil.move(str(temp_output), str(output_path))
+                    return True
+                except Exception as ex:
+                    print(f"Final shutil.move failed: {ex}")
+            return False
         return False
     except Exception as e:
-        print(f"FFmpeg running error: {e}")
+        print(f"FFmpeg running exception: {e}")
         if temp_output.exists():
-            temp_output.unlink()
+            try:
+                temp_output.unlink()
+            except Exception:
+                pass
         return False
 
 def concatenate_videos(input_paths: List[str], output_path: str) -> bool:
