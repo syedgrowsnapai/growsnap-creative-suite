@@ -998,7 +998,7 @@ class MainWindow(QMainWindow):
 
         settings_grid.addWidget(QLabel("Watermark Preset", self), 8, 0)
         self.combo_watermark_preset = QComboBox(self)
-        self.combo_watermark_preset.addItems(["Dola (SeaDance)", "HeyGen", "Runway (Gen-3)", "Luma (Dream Machine)", "Kling AI", "MiniMax (Hailuo)", "Pika", "NotebookLM", "Custom (Manual)"])
+        self.combo_watermark_preset.addItems(["Dola (SeaDance)", "Google Flow", "YT Shorts", "HeyGen", "Runway (Gen-3)", "Luma (Dream Machine)", "Kling AI", "MiniMax (Hailuo)", "Pika", "NotebookLM", "Custom (Manual)"])
         self.combo_watermark_preset.currentTextChanged.connect(self._on_left_preset_changed)
         settings_grid.addWidget(self.combo_watermark_preset, 8, 1)
 
@@ -1361,7 +1361,7 @@ class MainWindow(QMainWindow):
 
         conv_grid.addWidget(QLabel("Preset Platform", self), 2, 0)
         self.combo_conv_preset = QComboBox(self)
-        self.combo_conv_preset.addItems(["Dola (SeaDance)", "HeyGen", "Runway (Gen-3)", "Luma (Dream Machine)", "Kling AI", "MiniMax (Hailuo)", "Pika", "NotebookLM", "Custom (Manual)"])
+        self.combo_conv_preset.addItems(["Dola (SeaDance)", "Google Flow", "YT Shorts", "HeyGen", "Runway (Gen-3)", "Luma (Dream Machine)", "Kling AI", "MiniMax (Hailuo)", "Pika", "NotebookLM", "Custom (Manual)"])
         self.combo_conv_preset.currentTextChanged.connect(self._on_conv_preset_changed)
         conv_grid.addWidget(self.combo_conv_preset, 2, 1, 1, 3)
 
@@ -3610,6 +3610,22 @@ class MainWindow(QMainWindow):
                 "blur_w": 190,
                 "blur_h": 80,
                 "crop_px": 90
+            },
+            "Google Flow": {
+                "method": "Blur",
+                "blur_x": 566,
+                "blur_y": 1100,
+                "blur_w": 88,
+                "blur_h": 88,
+                "crop_px": 185
+            },
+            "YT Shorts": {
+                "method": "Blur",
+                "blur_x": 640,
+                "blur_y": 1200,
+                "blur_w": 56,
+                "blur_h": 60,
+                "crop_px": 80
             },
             "HeyGen": {
                 "method": "Blur",

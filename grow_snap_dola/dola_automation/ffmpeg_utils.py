@@ -124,22 +124,13 @@ def process_video_watermark(input_path: Path, method: str, output_path: Path,
     temp_output = output_path.parent / f"temp_{output_path.name}"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
-    if method_lower == 'blur':
-        # Regional boxblur with feathered edge alpha masking to prevent sharp rectangular patches
-        # We create a black mask of video size, draw a white rect over watermark, blur the mask to feather edges,
-        # blur the entire video, and merge original + blurred based on the feathered mask.
-        filter_str = (
-            f"color=black:s={width}x{height}[mask];"
-            f"[mask]drawbox=x={x}:y={y}:w={w}:h={h}:color=white:t=fill[mask_rect];"
-            f"[mask_rect]boxblur=20:20[mask_feathered];"
-            f"[0:v]boxblur=25:5[blurred];"
-            f"[0:v][blurred][mask_feathered]maskedmerge"
-        )
+    if method_lower in ('blur', 'delogo'):
+        # FFmpeg delogo filter seamlessly removes logos and watermarks by interpolating surrounding pixels
+        filter_str = f"delogo=x={x}:y={y}:w={w}:h={h}"
         cmd = [
             str(ffmpeg_exe), '-y',
             '-i', str(input_path),
-            '-filter_complex', filter_str,
-            '-shortest',
+            '-vf', filter_str,
             '-c:v', 'libx264',
             '-preset', 'fast',
             '-crf', '17',

@@ -1,6 +1,6 @@
 {
-  "version": "1.4.39",
+  "version": "1.4.40",
   "mandatory": false,
   "download_url": "https://github.com/syedgrowsnapai/growsnap-creative-suite/archive/refs/heads/main.zip",
-  "release_notes": "GrowSnap One updates."
+  "release_notes": "Added Google Flow and YouTube Shorts watermark removal presets with high-precision FFmpeg delogo inpainting filters."
 }
